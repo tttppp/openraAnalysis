@@ -98,8 +98,11 @@ for filename in filenames:
     x = f.read()
     f.close()
     
+    mapTitleField = b'MapTitle: '
+    mapTitleIndex = x.index(mapTitleField) + len(mapTitleField)
+    mapTitle = x[mapTitleIndex:mapTitleIndex + x[mapTitleIndex:].index(b'\n')]
+    
     length = len(x)
-    print(length)
     startGame = x.index(b'StartGame')
     #print(x[startGame:])
     
