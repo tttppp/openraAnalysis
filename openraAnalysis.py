@@ -93,6 +93,7 @@ itemMap = [{
            b'mig': 'mi'
            }]
 
+builds = []
 for filename in filenames:
     f = open(path + filename, 'rb')
     x = f.read()
@@ -145,6 +146,7 @@ for filename in filenames:
     placeBuildingTerm = b'PlaceBuilding'
     cancelProductionTerm = b'CancelProduction'
     pos = startGame
+    build = defaultdict(list)
     while True:
         startProductionPos = getPos(x, startProductionTerm, pos)
         placeBuildingPos = getPos(x, placeBuildingTerm, pos)
@@ -156,6 +158,9 @@ for filename in filenames:
             player, q, eventList = getStartProductionEvents(x, minPos)
         if placeBuildingPos == minPos:
             player, q, eventList = getPlaceBuildingEvents(x, minPos)
+            if q == 0:
+                for item in eventList:
+                    build[player].append(item)
         if cancelProductionPos == minPos:
             player, q, eventList = getCancelProductionEvent(x, minPos)
             for item in eventList:
@@ -170,5 +175,26 @@ for filename in filenames:
     
     for player, eventList in events.items():
         for q, queue in eventList.items():
-            print(player, q, ','.join(queue))
+            #print(player, q, ','.join(queue))
+            pass
+        builds.append(build[player])
+
+print(len(builds))
+
+def buildToStr(build):
+    return ''.join(build)
+
+POPULAR = 10
+buildTree = defaultdict(lambda : defaultdict(list))
+buildTree[0][''] = builds
+for depth in range(100):
+    for priorBuilt, oldBuilds in buildTree[depth].items():
+        newBuildIsPopular = False
+        for build in oldBuilds:
+            shallowBuild = buildToStr(build[:depth + 1])
+            buildTree[depth + 1][shallowBuild].append(build)
+            if len(buildTree[depth + 1][shallowBuild]) >= POPULAR:
+                newBuildIsPopular = True
+        if len(oldBuilds) >= POPULAR and not newBuildIsPopular:
+            print(len(oldBuilds), priorBuilt)
 
