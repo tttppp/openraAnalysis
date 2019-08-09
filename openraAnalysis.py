@@ -6,7 +6,16 @@
 from collections import defaultdict
 import os
 
-path = '../../.openra/Replays/ra/release-20190314/'
+SEASON = 7
+POPULAR = 5
+
+if SEASON == 6:
+    path = '../../Downloads/Season6/'
+elif SEASON == 7:
+    path = '../../.openra/Replays/ra/release-20190314/'
+else:
+    print('Unknown season', SEASON)
+    raise Exception
 
 filenames = []
 for root, dirs, files in os.walk(path):
@@ -64,6 +73,7 @@ itemMap = [{
            b'dog': 'd',
            b'shok': 's',
            b'thf': 't',
+           b'hijacker': 't',
            b'spy': '?',
            b'spy.england': '?',
            },{
@@ -82,6 +92,7 @@ itemMap = [{
            b'dtrk': 'dt',
            b'mrj': 'rj',
            b'mgg': 'mg',
+           b'ctnk': 'ct',
            b'stnk': 'pt',
            b'truk': '$$',
            b'mcv': 'mc',
@@ -93,6 +104,7 @@ itemMap = [{
            b'mig': 'mi'
            }]
 
+buildsByMap = defaultdict(list)
 builds = []
 for filename in filenames:
     f = open(path + filename, 'rb')
@@ -106,13 +118,19 @@ for filename in filenames:
     length = len(x)
     startGame = x.index(b'StartGame')
     #print(x[startGame:])
-    
+
     def outputEvent(event):
         for q, queue in enumerate(itemMap):
             if event in queue.keys():
                 return q, queue[event]
-        print('UNKNOWN:', event.decode('utf-8'))
+        print('UNKNOWN:', event.decode('utf-8'), 'in', filename)
         raise Exception
+    
+    #StartProduction\x03\x00\x00\x00$\x04powr\x01\x00\x00\x00\x07\x00\x00\x00\t
+    #StartProduction\x03\x00\x00\x00,\x04powr\x01\x00\x00\x00\xTT\x03\x00\x00\t
+    
+    #PlaceBuilding\x03\x00\x00\x00e\x02\xGG\x00\x00\x00\x??\x00\x00\x00\x00\x00\x00\x00\x00\x04powr\x03\x00\x00\x00\x07\x00\x00\x00\t
+    #PlaceBuilding\x03\x00\x00\x00e\x02\x00\x..\x90\x00\x00\x04proc\x03\x00\x00\x00\xTT\x03\x00\x00\t
     
     def getPos(x, term, start):
         try:
@@ -131,6 +149,9 @@ for filename in filenames:
     def getPlaceBuildingEvents(x, pos):
         l = x[pos + 11]
         item = x[pos + 12: pos + 12 + l]
+        if SEASON == 6:
+            l = x[pos + 19]
+            item = x[pos + 20: pos + 20 + l]
         q, item = outputEvent(item)
         return x[pos], q, ['[' + item + ']']
     
@@ -177,24 +198,31 @@ for filename in filenames:
         for q, queue in eventList.items():
             #print(player, q, ','.join(queue))
             pass
+        #if ''.join(build[player]).startswith('[PP][Rf][WF][Rf][PP][Rx]'):
+        #    print(filename, mapTitle)
         builds.append(build[player])
+        buildsByMap[mapTitle].append(build[player])
 
 print(len(builds))
 
 def buildToStr(build):
     return ''.join(build)
 
-POPULAR = 10
-buildTree = defaultdict(lambda : defaultdict(list))
-buildTree[0][''] = builds
-for depth in range(100):
-    for priorBuilt, oldBuilds in buildTree[depth].items():
-        newBuildIsPopular = False
-        for build in oldBuilds:
-            shallowBuild = buildToStr(build[:depth + 1])
-            buildTree[depth + 1][shallowBuild].append(build)
-            if len(buildTree[depth + 1][shallowBuild]) >= POPULAR:
-                newBuildIsPopular = True
-        if len(oldBuilds) >= POPULAR and not newBuildIsPopular:
-            print(len(oldBuilds), priorBuilt)
+def findPopularBuilds(builds):
+    buildTree = defaultdict(lambda : defaultdict(list))
+    buildTree[0][''] = builds
+    for depth in range(100):
+        for priorBuilt, oldBuilds in buildTree[depth].items():
+            newBuildIsPopular = False
+            for build in oldBuilds:
+                shallowBuild = buildToStr(build[:depth + 1])
+                buildTree[depth + 1][shallowBuild].append(build)
+                if len(buildTree[depth + 1][shallowBuild]) >= POPULAR:
+                    newBuildIsPopular = True
+            if len(oldBuilds) >= POPULAR and not newBuildIsPopular:
+                print(len(oldBuilds), priorBuilt)
 
+for mapTitle in buildsByMap.keys():
+    print('###', mapTitle, '###')
+    findPopularBuilds(buildsByMap[mapTitle])
+    
