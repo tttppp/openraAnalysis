@@ -157,6 +157,7 @@ def getAbbreviationsFromFilename(filename):
 
 buildsByMap = defaultdict(list)
 builds = []
+queues = []
 unitList = defaultdict(list)
 players = []
 fingerPrintToProfile = loadCachedFingerprints()
@@ -320,6 +321,7 @@ for filename in filenames:
         #    print(filename, mapTitle)
         builds.append(build[player])
         buildsByMap[mapTitle].append(build[player])
+        queues.append(eventList)
 
 # Faction win/loss ratio.
 factionWin = Counter()
@@ -357,7 +359,16 @@ for q in unitList.keys():
     outStrs = []
     for item, count in Counter(unitList[q]).most_common():
         if '[' not in item or ']' not in item:
-            outStrs.append('{}: {}'.format(item, count))
+            wins = 0
+            losses = 0
+            for i, queue in enumerate(queues):
+                if item in queue[q]:
+                    if players[i]['outcome'] == 'Won':
+                        wins += 1
+                    elif players[i]['outcome'] == 'Lost':
+                        losses += 1
+            winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
+            outStrs.append('{}: {} ({} builds, {} wins)'.format(item, count, wins + losses, winRate))
     print(', '.join(outStrs))
 
 def buildToStr(build):
@@ -392,10 +403,17 @@ def findPopularBuilds(builds, popularLimit=POPULAR):
 
 for profileName in set(map(lambda player: player['profileName'], players)):
     playerBuilds = []
+    wins = 0
+    losses = 0
     for i, player in enumerate(players):
         if player['profileName'] == profileName:
             playerBuilds.append(builds[i])
-    print('=== {} (Played {} game(s)) ==='.format(profileName, len(playerBuilds)))
+            if player['outcome'] == 'Won':
+                wins += 1
+            elif player['outcome'] == 'Lost':
+                losses += 1
+    winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
+    print('=== {} (Played {} game(s), Win Rate {}) ==='.format(profileName, len(playerBuilds), winRate))
     findPopularBuilds(playerBuilds, POPULAR_FOR_PLAYER)
 
 mapPickCounter = Counter()
