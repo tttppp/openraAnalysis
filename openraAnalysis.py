@@ -5,13 +5,16 @@
 
 from collections import defaultdict, Counter
 import os, sys
+import requests
 
 SEASON = 9
 POPULAR = 20
 PREFIX = 'RAGL-'
-#PREFIX = ''
 ABRIDGE_OUTPUT = True
 ITEM_TO_FIND = None
+
+POPULAR_FOR_PLAYER = 5
+POPULAR_FOR_MAP = 10
 
 if SEASON == 6:
     path = '../../Downloads/Season6/'
@@ -24,6 +27,8 @@ elif SEASON == 9:
 else:
     print('Unknown season', SEASON)
     raise Exception
+
+FINGERPRINT_CACHE_FILE = 'fingerprint.cache'
 
 filenames = []
 for root, dirs, files in os.walk(path):
@@ -130,10 +135,31 @@ itemMap = [{
 def bytesToInt(b):
     return int('0x' + b.encode('hex'), 16)
 
+def loadCachedFingerprints():
+    fingerprintToProfile = {}
+    try:
+        with open(FINGERPRINT_CACHE_FILE) as fingerprintCache:
+            lines = fingerprintCache.readlines()
+            for line in lines:
+                fingerprint, profileID, profileName = line.strip().split('\t')
+                fingerprintToProfile[fingerprint] = {'profileID': profileID, 'profileName': profileName}
+    except IOError:
+        # Assume that this is the first run and the fingerprint cache file doesn't exist yet.
+        pass
+    return fingerprintToProfile
+
+def getAbbreviationsFromFilename(filename):
+    potentialAbbreviations = []
+    for bit in filename.split('-')[2:]:
+        if len(bit) == 3:
+            potentialAbbreviations.append(bit)
+    return potentialAbbreviations
+
 buildsByMap = defaultdict(list)
 builds = []
 unitList = defaultdict(list)
 players = []
+fingerPrintToProfile = loadCachedFingerprints()
 for filename in filenames:
     f = open(path + filename, 'rb')
     x = f.read()
@@ -149,7 +175,6 @@ for filename in filenames:
     
     length = len(x)
     startGame = x.index(b'StartGame')
-    #print(x[startGame:])
 
     def outputEvent(event):
         for q, queue in enumerate(itemMap):
@@ -157,12 +182,6 @@ for filename in filenames:
                 return q, queue[event]
         print('UNKNOWN:', event.decode('utf-8'), 'in', filename)
         raise Exception
-    
-    #StartProduction\x03\x00\x00\x00$\x04powr\x01\x00\x00\x00\x07\x00\x00\x00\t
-    #StartProduction\x03\x00\x00\x00,\x04powr\x01\x00\x00\x00\xTT\x03\x00\x00\t
-    
-    #PlaceBuilding\x03\x00\x00\x00e\x02\xGG\x00\x00\x00\x??\x00\x00\x00\x00\x00\x00\x00\x00\x04powr\x03\x00\x00\x00\x07\x00\x00\x00\t
-    #PlaceBuilding\x03\x00\x00\x00e\x02\x00\x..\x90\x00\x00\x04proc\x03\x00\x00\x00\xTT\x03\x00\x00\t
     
     def getPos(x, term, start):
         try:
@@ -172,7 +191,7 @@ for filename in filenames:
             return len(x)
     
     def getField(x, pos, field):
-        start = getPos(x, field + b': ', playerPos)
+        start = getPos(x, field + b': ', pos)
         end = getPos(x, b'\n', start)
         return x[start:end-1]
     
@@ -216,6 +235,19 @@ for filename in filenames:
                 break
             playerPos = pos
         fingerprint = getField(x, playerPos, b'Fingerprint')
+        if fingerprint != '':
+            if not fingerPrintToProfile.has_key(fingerprint):
+                response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
+                for line in response.text.split('\n'):
+                    line = line.strip()
+                    if line.startswith('ProfileID: '):
+                        profileID = line[len('ProfileID: '):]
+                    elif line.startswith('ProfileName: '):
+                        profileName = line[len('ProfileName: '):]
+                fingerPrintToProfile[fingerprint] = {'profileID': profileID, 'profileName': profileName}
+                with open(FINGERPRINT_CACHE_FILE, 'a') as fingerprintCache:
+                    fingerprintCache.write('{}\t{}\t{}\n'.format(fingerprint, profileID, profileName))
+                
         name = getField(x, playerPos, b'Name')
         outcome = getField(x, playerPos, b'Outcome')
         clientIndex = getField(x, playerPos, b'ClientIndex')
@@ -230,7 +262,10 @@ for filename in filenames:
         
         players.append({'fingerprint': fingerprint,
                         'name': name,
+                        'profileID': 'Unknown' if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileID'],
+                        'profileName': name if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileName'],
                         'filename': filename,
+                        'abbreviations': getAbbreviationsFromFilename(filename),
                         'faction': faction,
                         'factionPick': factionPick,
                         'outcome': outcome})
@@ -286,6 +321,37 @@ for filename in filenames:
         builds.append(build[player])
         buildsByMap[mapTitle].append(build[player])
 
+# Faction win/loss ratio.
+factionWin = Counter()
+factionLoss = Counter()
+for player in players:
+    faction = player['faction']
+    factionPick = player['factionPick']
+    if player['outcome'] == 'Won':
+        factionWin[faction] += 1
+        factionWin[factionPick] += 1
+        factionWin[(faction, factionPick)] += 1
+    elif player['outcome'] == 'Lost':
+        factionLoss[faction] += 1
+        factionLoss[factionPick] += 1
+        factionLoss[(faction, factionPick)] += 1
+print('Faction        Win Rate       From Random A/S     Picked Win Rate')
+for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
+                    ('France', ('France', 'RandomAllies'), 'france'),
+                    ('Germany', ('Germany', 'RandomAllies'), 'germany'),
+                    ('RandomAllies', '', ''),
+                    ('Russia', ('Russia', 'RandomSoviet'), 'russia'),
+                    ('Ukraine', ('Ukraine', 'RandomSoviet'), 'ukraine'),
+                    ('RandomSoviet', '', ''),
+                    ('Random', '', '')]:
+    factionReports = []
+    for faction in factionTuple:
+        if faction in factionWin or faction in factionLoss:
+            factionReports.append('{: >3}/{: >3} {:0.0f}%'.format(factionWin[faction], (factionWin[faction] + factionLoss[faction]), factionWin[faction] * 100.0 / (factionWin[faction] + factionLoss[faction])))
+        else:
+            factionReports.append('    ---    ')
+    print('{: <12} {}'.format(factionTuple[0], '        '.join(factionReports)))
+
 for q in unitList.keys():
     print('~~~ Queue {} ~~~'.format(q))
     outStrs = []
@@ -297,7 +363,7 @@ for q in unitList.keys():
 def buildToStr(build):
     return ''.join(build)
 
-def findPopularBuilds(builds):
+def findPopularBuilds(builds, popularLimit=POPULAR):
     buildTree = defaultdict(lambda : defaultdict(list))
     buildTree[0][''] = builds
     out = []
@@ -307,9 +373,9 @@ def findPopularBuilds(builds):
             for build in oldBuilds:
                 shallowBuild = buildToStr(build[:depth + 1])
                 buildTree[depth + 1][shallowBuild].append(build)
-                if len(buildTree[depth + 1][shallowBuild]) >= POPULAR:
+                if len(buildTree[depth + 1][shallowBuild]) >= popularLimit:
                     newBuildIsPopular = True
-            if len(oldBuilds) >= POPULAR and not newBuildIsPopular:
+            if len(oldBuilds) >= popularLimit and not newBuildIsPopular:
                 out.append([priorBuilt, len(oldBuilds)])
     previousBuild = ''
     for outLine in sorted(out):
@@ -324,32 +390,31 @@ def findPopularBuilds(builds):
             previousBuild = outLineOriginal
         print('{} {}'.format(outLine[1], outLine[0]))
 
-# Determine who the players were
-fingerprints = Counter(map(lambda p: p['fingerprint'], players))
-playersByFingerprint = defaultdict(Counter)
-for player in players:
-    playersByFingerprint[player['fingerprint']][player['name']] += 1
+for profileName in set(map(lambda player: player['profileName'], players)):
+    playerBuilds = []
+    for i, player in enumerate(players):
+        if player['profileName'] == profileName:
+            playerBuilds.append(builds[i])
+    print('=== {} (Played {} game(s)) ==='.format(profileName, len(playerBuilds)))
+    findPopularBuilds(playerBuilds, POPULAR_FOR_PLAYER)
 
 mapPickCounter = Counter()
 for mapTitle in buildsByMap.keys():
     mapPickCounter[mapTitle] += len(buildsByMap[mapTitle])
 for mapTitle, count in mapPickCounter.most_common():
     print('### {} (Picked {} time(s)) ###'.format(mapTitle, count / 2))
-    findPopularBuilds(buildsByMap[mapTitle])
+    findPopularBuilds(buildsByMap[mapTitle], POPULAR_FOR_MAP)
 
 print('--- Overall (Total {} game(s)) ---'.format(len(builds)))
-allBuilds = []
-for builds in buildsByMap.values():
-    allBuilds += builds
-findPopularBuilds(allBuilds)
+findPopularBuilds(builds)
 
 def expand(item):
     return '{1}{0}'.format(item[0], item[1])
 
 #print('---Overall Positions---')
 positionCount = Counter()
-for builds in buildsByMap.values():
-    for build in builds:
+for buildsForMap in buildsByMap.values():
+    for build in buildsForMap:
         partialBuild = Counter()
         for building in build:
             partialBuild[building] += 1
