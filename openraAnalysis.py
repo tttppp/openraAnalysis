@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 
 # TODO: Determine which player the DeployTransform command belongs to, and whether it's a deploy or an undeploy.
