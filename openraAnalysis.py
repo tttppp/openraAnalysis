@@ -9,15 +9,19 @@ import requests
 
 SEASON = 9
 POPULAR = 20
-PREFIX = 'RAGL-'
+PREFIX = 'RAGL-S{:02d}-'.format(SEASON)
 ABRIDGE_OUTPUT = True
 ITEM_TO_FIND = None
 
-POPULAR_FOR_PLAYER = 5
+POPULAR_FOR_PLAYER = 3
 POPULAR_FOR_MAP = 10
 
-if SEASON == 6:
-    path = '../../Downloads/Season6/'
+if SEASON == 4:
+    path = '../../.openra/Replays/ra/release-20170527/'
+elif SEASON == 5:
+    path = '../../.openra/Replays/ra/release-20180307/'
+elif SEASON == 6:
+    path = '../../.openra/Replays/ra/release-20180923/'
 elif SEASON == 7:
     path = '../../.openra/Replays/ra/release-20190314/'
 elif SEASON == 8:
@@ -79,7 +83,9 @@ itemMap = [{
            b'syrf': 'Y?', # Fake Naval Yard
            b'weaf': 'W?', # Fake War Factory
            b'tenf': 'X?', # Fake Barracks
-           b'pdof': 'S?', # Fake chronosphere
+           b'pdof': 'S?', # Fake Chronosphere
+           b'atef': 'T?', # Fake Allied Tech Center
+           b'fapw': 'A?', # Fake Advance Power
            },{
            b'e1': 'm', # Rifle
            b'e2': 'g', # Gren
@@ -210,12 +216,16 @@ for filename in filenames:
         return player, q, [item] * count
     
     def getPlaceBuildingEvents(x, pos):
-        l = bytesToInt(x[pos + 11])
         player = getPlayer(x, pos)
-        item = x[pos + 12: pos + 12 + l]
-        if SEASON == 6:
-            l = bytesToInt(x[pos + 19])
-            item = x[pos + 20: pos + 20 + l]
+        offset = (17 if SEASON <= 4 else (19 if SEASON <= 6 else 11))
+        l = bytesToInt(x[pos + offset])
+        item = x[pos + offset + 1: pos + offset + 1 + l]
+        #if SEASON <= 4:
+        #    l = bytesToInt(x[pos + 17])
+        #    item = x[pos + 18: pos + 18 + l]
+        #elif SEASON in [5, 6]:
+        #    l = bytesToInt(x[pos + 19])
+        #    item = x[pos + 20: pos + 20 + l]
         q, item = outputEvent(item)
         return player, q, ['[' + item + ']']
     
@@ -303,25 +313,31 @@ for filename in filenames:
             else:
                 events[player][q] += eventList
             pos = minPos
+
+        if len(events) != 2:
+            # Probably one of the players gave no orders.
+            print('Found game with {} player(s): {}'.format(len(events), filename))
+            players = players[:-2]
+            raise Exception
+            
+        for player, eventList in events.items():
+            for q, queue in eventList.items():
+                # Can be used to find which game contains an unusual item.
+                if ITEM_TO_FIND in queue:
+                    print(ITEM_TO_FIND, ' found in ', filename, mapTitle, 'Count:', queue.count(ITEM_TO_FIND))
+                #print(player, q, ','.join(queue))
+                unitList[q] += queue
+            #if ''.join(build[player]).startswith('[PP][PP][PP]'):
+            #    print(filename, mapTitle)
+            builds.append(build[player])
+            buildsByMap[mapTitle].append(build[player])
+            queues.append(eventList)
     except ZeroDivisionError:
         # Used for debugging.
         sys.tracebacklimit = 0
         raise Exception
     except:
         print('Skipping ' + filename)
-    
-    for player, eventList in events.items():
-        for q, queue in eventList.items():
-            # Can be used to find which game contains an unusual item.
-            if ITEM_TO_FIND in queue:
-                print(ITEM_TO_FIND, ' found in ', filename, mapTitle, 'Count:', queue.count(ITEM_TO_FIND))
-            #print(player, q, ','.join(queue))
-            unitList[q] += queue
-        #if ''.join(build[player]).startswith('[PP][Rf][WF][Rf][PP][Rx]'):
-        #    print(filename, mapTitle)
-        builds.append(build[player])
-        buildsByMap[mapTitle].append(build[player])
-        queues.append(eventList)
 
 # Faction win/loss ratio.
 factionWin = Counter()
@@ -401,10 +417,25 @@ def findPopularBuilds(builds, popularLimit=POPULAR):
             previousBuild = outLineOriginal
         print('{} {}'.format(outLine[1], outLine[0]))
 
+def makeFactionString(playerPicks):
+    factionStrings = []
+    for faction, count in playerPicks.most_common():
+        letter = faction[0].upper()
+        if faction == 'RandomAllies':
+            letter = 'A'
+        elif faction == 'RandomSoviet':
+            letter = 'S'
+        elif faction == 'Random':
+            letter = '?'
+        rate = '{:0.0f}%'.format(count * 100.0 / sum(playerPicks.values()))
+        factionStrings.append('{}:{}'.format(letter, rate))
+    return ','.join(factionStrings)
+
 for profileName in set(map(lambda player: player['profileName'], players)):
     playerBuilds = []
     wins = 0
     losses = 0
+    playerPicks = Counter()
     for i, player in enumerate(players):
         if player['profileName'] == profileName:
             playerBuilds.append(builds[i])
@@ -412,8 +443,10 @@ for profileName in set(map(lambda player: player['profileName'], players)):
                 wins += 1
             elif player['outcome'] == 'Lost':
                 losses += 1
+            playerPicks[player['factionPick']] += 1
     winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
-    print('=== {} (Played {} game(s), Win Rate {}) ==='.format(profileName, len(playerBuilds), winRate))
+    factionStr = makeFactionString(playerPicks)
+    print('=== {} (Played {} game(s), Win Rate {}, Factions {}) ==='.format(profileName, len(playerBuilds), winRate, factionStr))
     findPopularBuilds(playerBuilds, POPULAR_FOR_PLAYER)
 
 mapPickCounter = Counter()
