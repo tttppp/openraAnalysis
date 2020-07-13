@@ -164,6 +164,9 @@ itemMap = [{
 
 def bytesToInt(b):
     """Convert a binary string value to an integer."""
+    if isinstance(b, int):
+        # Python 3 does this for a single byte automatically.
+        return b
     return int('0x' + b.encode('hex'), 16)
 
 def loadCachedFingerprints():
@@ -206,7 +209,7 @@ for filename in filenames:
     try:
         mapTitleField = b'MapTitle: '
         mapTitleIndex = x.index(mapTitleField) + len(mapTitleField)
-        mapTitle = x[mapTitleIndex:mapTitleIndex + x[mapTitleIndex:].index(b'\n')]
+        mapTitle = x[mapTitleIndex:mapTitleIndex + x[mapTitleIndex:].index(b'\n')].decode('utf-8')
     except:
         print('No map title found in {} - replay corrupted?'.format(filename))
         continue
@@ -263,6 +266,9 @@ for filename in filenames:
         term: The binary string to search for.
         start: The position to start the search from.
         Returns: The position just after the search term finishes, or the length of the content if the term is not found."""
+        # This is needed in Python 3 to ensure we are searching for bytes in a bytes object.
+        if isinstance(term, str):
+            term = term.encode('utf-8')
         try:
             return x[start:].index(term) + len(term) + start
         except ValueError:
@@ -278,7 +284,7 @@ for filename in filenames:
         Returns: The corresponding value (e.g. 'F5F872')."""
         fieldStart = getPos(x, field + b': ', start)
         fieldEnd = getPos(x, b'\n', fieldStart)
-        return x[fieldStart:fieldEnd-1]
+        return x[fieldStart:fieldEnd-1].decode('utf-8')
 
     # Build information comes after the "StartGame" command.
     startGame = x.index(b'StartGame')
@@ -287,13 +293,13 @@ for filename in filenames:
     for playerId in [0, 1]:
         pos = -1
         while True:
-            pos = getPos(x, b'Player@{}:'.format(playerId), pos + 1)
+            pos = getPos(x, b'Player@%d:'%playerId, pos + 1)
             if pos >= len(x):
                 break
             playerPos = pos
         fingerprint = getField(x, b'Fingerprint', playerPos)
         if fingerprint != '':
-            if not fingerPrintToProfile.has_key(fingerprint):
+            if fingerprint not in fingerPrintToProfile:
                 response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
                 for line in response.text.split('\n'):
                     line = line.strip()
@@ -307,11 +313,11 @@ for filename in filenames:
                 
         name = getField(x, b'Name', playerPos)
         outcome = getField(x, b'Outcome', playerPos)
-        clientIndex = getField(x, b'ClientIndex', playerPos)
+        clientIndex = int(getField(x, b'ClientIndex', playerPos))
         faction = getField(x, b'FactionName', playerPos)
         pos = -1
         while True:
-            pos = getPos(x, b'Client@{}:'.format(clientIndex), pos + 1)
+            pos = getPos(x, b'Client@%d:'%clientIndex, pos + 1)
             if pos >= len(x):
                 break
             clientPos = pos
@@ -366,7 +372,8 @@ for filename in filenames:
             players = players[:-2]
             raise Exception
             
-        for player, eventList in events.items():
+        for player in sorted(events.keys()):
+            eventList = events[player]
             for q, queue in eventList.items():
                 # Can be used to find which game contains an unusual item.
                 if ITEM_TO_FIND in queue:
@@ -419,7 +426,7 @@ for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
     print('{: <12} {}'.format(factionTuple[0], '        '.join(factionReports)))
 
 # A report of the buildings and units that were queued, and how effective they were.
-for q in unitList.keys():
+for q in sorted(unitList.keys()):
     print('~~~ Queue {} ~~~'.format(q))
     outStrs = []
     for item, count in Counter(unitList[q]).most_common():
@@ -445,7 +452,8 @@ def findPopularBuilds(builds, popularLimit=POPULAR):
     buildTree[0][''] = builds
     out = []
     for depth in range(100):
-        for priorBuilt, oldBuilds in buildTree[depth].items():
+        for priorBuilt in sorted(buildTree[depth].keys()):
+            oldBuilds = buildTree[depth][priorBuilt]
             newBuildIsPopular = False
             for build in oldBuilds:
                 shallowBuild = ''.join(build[:depth + 1])
@@ -488,7 +496,7 @@ def makeFactionString(playerPicks):
     return ','.join(factionStrings)
 
 # A report for each player of their most common build orders.
-for profileName in set(map(lambda player: player['profileName'], players)):
+for profileName in sorted(set(map(lambda player: player['profileName'], players))):
     playerBuilds = []
     wins = 0
     losses = 0
@@ -511,7 +519,7 @@ mapPickCounter = Counter()
 for mapTitle in buildsByMap.keys():
     mapPickCounter[mapTitle] += len(buildsByMap[mapTitle])
 for mapTitle, count in mapPickCounter.most_common():
-    print('### {} (Picked {} time(s)) ###'.format(mapTitle, count / 2))
+    print('### {} (Picked {} time(s)) ###'.format(mapTitle, int(count / 2)))
     findPopularBuilds(buildsByMap[mapTitle], POPULAR_FOR_MAP)
 
 # A report of the overall most popular build orders.
