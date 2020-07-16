@@ -408,14 +408,18 @@ for player in players:
         factionLoss[faction] += 1
         factionLoss[factionPick] += 1
         factionLoss[(faction, factionPick)] += 1
+factionWin['Allies'] = factionWin['England'] + factionWin['France'] + factionWin['Germany']
+factionLoss['Allies'] = factionLoss['England'] + factionLoss['France'] + factionLoss['Germany']
+factionWin['Soviet'] = factionWin['Russia'] + factionWin['Ukraine']
+factionLoss['Soviet'] = factionLoss['Russia'] + factionLoss['Ukraine']
 print('Faction        Win Rate       From Random A/S     Picked Win Rate')
 for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
                     ('France', ('France', 'RandomAllies'), 'france'),
                     ('Germany', ('Germany', 'RandomAllies'), 'germany'),
-                    ('RandomAllies', '', ''),
+                    ('Allies', 'RandomAllies', ''),
                     ('Russia', ('Russia', 'RandomSoviet'), 'russia'),
                     ('Ukraine', ('Ukraine', 'RandomSoviet'), 'ukraine'),
-                    ('RandomSoviet', '', ''),
+                    ('Soviet', 'RandomSoviet', ''),
                     ('Random', '', '')]:
     factionReports = []
     for faction in factionTuple:
@@ -511,7 +515,7 @@ for profileName in sorted(set(map(lambda player: player['profileName'], players)
             playerPicks[player['factionPick']] += 1
     winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
     factionStr = makeFactionString(playerPicks)
-    print('=== {} (Played {} game(s), Win Rate {}, Factions {}) ==='.format(profileName, len(playerBuilds), winRate, factionStr))
+    print(u'=== {} (Played {} game(s), Win Rate {}, Factions {}) ==='.format(profileName, len(playerBuilds), winRate, factionStr))
     findPopularBuilds(playerBuilds, POPULAR_FOR_PLAYER)
 
 # A report for each map of the most popular build orders.
