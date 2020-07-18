@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 # TODO: Determine which player the DeployTransform command belongs to, and whether it's a deploy or an undeploy.
-# TODO: Avoid builds like "[PP][PP]..." where the player has tried to place a building in an invalid location.
 
 from collections import defaultdict, Counter
 import os, sys
@@ -275,6 +274,27 @@ for filename in filenames:
             # No more terms found.
             return len(x)
 
+    def getPlaceBuildingPos(x, placeBuildingTerm, start):
+        """Search for the a "place building" event and return the position just after it.
+        
+        x: The binary string to search through.
+        placeBuildingTerm: The term to search for.
+        start: The position to start the search from.
+        Returns: The position just after the "place building" term, or the length of the content if none was found.
+        Note that this tries to ignore invalid place building events by looking for other matching "place building" events soon after."""
+        placeBuildingPos = getPos(x, placeBuildingTerm, start)
+        if placeBuildingPos < len(x):
+            player, q, eventList = getPlaceBuildingEvents(x, placeBuildingPos)
+            # If player fails to place building then there will likely be another very soon after
+            # (using trial and error this seems to be less than 1000 bytes after).
+            nextPlaceBuildingPos = getPos(x, placeBuildingTerm, placeBuildingPos)
+            while nextPlaceBuildingPos < len(x) and nextPlaceBuildingPos < placeBuildingPos + 1000:
+                nextEventPlayer, nextEventQ, nextEventList = getPlaceBuildingEvents(x, nextPlaceBuildingPos)
+                if nextEventPlayer == player and nextEventQ == q and eventList == nextEventList:
+                    placeBuildingPos = nextPlaceBuildingPos
+                nextPlaceBuildingPos = getPos(x, placeBuildingTerm, nextPlaceBuildingPos)
+        return placeBuildingPos
+
     def getField(x, field, start):
         """Search for the value of a field (e.g. 'Color: F5F872').
         
@@ -342,7 +362,7 @@ for filename in filenames:
     try:
         while True:
             startProductionPos = getPos(x, startProductionTerm, pos)
-            placeBuildingPos = getPos(x, placeBuildingTerm, pos)
+            placeBuildingPos = getPlaceBuildingPos(x, placeBuildingTerm, pos)
             cancelProductionPos = getPos(x, cancelProductionTerm, pos)
             minPos = min(startProductionPos, placeBuildingPos, cancelProductionPos)
             if minPos == len(x):
