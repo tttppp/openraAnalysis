@@ -20,6 +20,8 @@ POPULARITY_FOR_BUILD_STATE = 100
 ABRIDGE_OUTPUT = True
 # This can be used to find builds that contain an unusual item. E.g Set it to 'Si' to output replays featuring a (queued) silo.
 ITEM_TO_FIND = None
+# This can be used to only look at particular matchups (e.g. Set it to set(['Random']) to look at Random v Random)
+FACTION_PICK_FILTER = None
 
 # The location of the OpenRA support directory.
 # The support directory is where the game keeps the saved settings, maps, replays, logs and mod assets.  The default location is as follows, but one can choose to move it to an arbitrary location by passing an Engine.SupportDir argument to the Game.exe
@@ -32,15 +34,17 @@ ITEM_TO_FIND = None
 OPENRA_SUPPORT_DIRECTORY = '{}/.openra'.format(os.path.expanduser('~'))
 
 # Load the replays from the corresponding location for the RAGL season.
-if SEASON == 4:
+if SEASON == 1:
+    path = '{}/Replays/ra/release-20151224/'.format(OPENRA_SUPPORT_DIRECTORY)
+elif SEASON in [2, 3]:
+    path = '{}/Replays/ra/release-20161019/'.format(OPENRA_SUPPORT_DIRECTORY)
+elif SEASON == 4:
     path = '{}/Replays/ra/release-20170527/'.format(OPENRA_SUPPORT_DIRECTORY)
 elif SEASON == 5:
     path = '{}/Replays/ra/release-20180307/'.format(OPENRA_SUPPORT_DIRECTORY)
 elif SEASON == 6:
     path = '{}/Replays/ra/release-20180923/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 7:
-    path = '{}/Replays/ra/release-20190314/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 8:
+elif SEASON in [7, 8]:
     path = '{}/Replays/ra/release-20190314/'.format(OPENRA_SUPPORT_DIRECTORY)
 elif SEASON == 9:
     path = '{}/Replays/ra/release-20200503/'.format(OPENRA_SUPPORT_DIRECTORY)
@@ -63,101 +67,111 @@ for root, dirs, files in os.walk(path):
 # * The two airfields 'afld' and 'afld.ukraine' are both mapped to 'AF'.
 # * Infantry 'e1' to 'e7' are mapped to more representative characters.
 itemMap = [{
-           b'powr': 'PP', # Powerplant
-           b'tent': 'Rx', # Barracks (Allies)
-           b'barr': 'Rx', # Barracks (Soviet)
-           b'proc': 'Rf', # Refinery
-           b'weap': 'WF', # War Factory
-           b'fix': 'SD', # Service Depot
-           b'dome': 'RD', # Radar Dome
-           b'hpad': 'HP', # Helipad
-           b'afld': 'AF', # Airfield
-           b'afld.ukraine': 'AF', # Airfield (Ukraine)
-           b'apwr': 'AP', # Advanced Power Plant
-           b'kenn': 'Ke', # Kennel
-           b'stek': 'TC', # Tech Centre (Soviet)
-           b'atek': 'TC', # Tech Centre (Allies)
-           b'spen': 'SP', # Sub Pen
-           b'syrd': 'NY' # Naval Yard
+           b'powr': ('PP', 'Powerplant'),
+           b'tent': ('Rx', 'Barracks'), # Allies
+           b'barr': ('Rx', 'Barracks'), # Soviet
+           b'proc': ('Rf', 'Refinery'),
+           b'weap': ('WF', 'War Factory'),
+           b'fix': ('SD', 'Service Depot'),
+           b'dome': ('RD', 'Radar Dome'),
+           b'hpad': ('HP', 'Helipad'),
+           b'afld': ('AF', 'Airfield'),
+           b'afld.ukraine': ('AF', 'Airfield'),
+           b'apwr': ('AP', 'Advanced Power Plant'),
+           b'kenn': ('Ke', 'Kennel'),
+           b'stek': ('TC', 'Tech Centre'), # Soviet
+           b'atek': ('TC', 'Tech Centre'), # Allies
+           b'spen': ('SP', 'Sub Pen'),
+           b'syrd': ('NY', 'Naval Yard')
            },{
-           b'pbox': 'PB', # Pillbox
-           b'hbox': 'CP', # Camo Pillbox
-           b'gun': 'Tu', # Turret
-           b'ftur': 'FT', # Flame Tower
-           b'tsla': 'Ts', # Teslacoil
-           b'agun': 'AA', # AA Gun
-           b'sam': 'Sa', # SAM Site
-           b'gap': 'GG', # Gap Generator
-           b'pdox': 'Cs', # Chronosphere
-           b'iron': 'IC', # Iron Curtain
-           b'mslo': 'MS', # Missile Silo
-           b'fenc': '--', # Barbed Wire Fence
-           b'sbag': '--', # Sandbag
-           b'brik': '==', # Concrete Wall
-           b'silo': 'Si', # Silo
+           b'pbox': ('PB', 'Pillbox'),
+           b'hbox': ('CP', 'Camo Pillbox'),
+           b'gun': ('Tu', 'Turret'),
+           b'ftur': ('FT', 'Flame Tower'),
+           b'tsla': ('Ts', 'Teslacoil'),
+           b'agun': ('AA', 'AA Gun'),
+           b'sam': ('Sa', 'SAM Site'),
+           b'gap': ('GG', 'Gap Generator'),
+           b'pdox': ('Cs', 'Chronosphere'),
+           b'iron': ('IC', 'Iron Curtain'),
+           b'mslo': ('MS', 'Missile Silo'),
+           b'fenc': ('--', 'Fence'), # Barbed Wire Fence
+           b'sbag': ('--', 'Fence'), # Sandbag
+           b'brik': ('==', 'Concrete Wall'),
+           b'silo': ('Si', 'Silo'),
            # Fakes
-           b'facf': 'C?', # Fake Conyard
-           b'mslf': 'M?', # Fake Missile Silo
-           b'fpwr': 'P?', # Fake Power Plant
-           b'domf': 'R?', # Fake Radar Dome
-           b'fixf': 'F?', # Fake Service Depot
-           b'syrf': 'Y?', # Fake Naval Yard
-           b'weaf': 'W?', # Fake War Factory
-           b'tenf': 'X?', # Fake Barracks
-           b'pdof': 'S?', # Fake Chronosphere
-           b'atef': 'T?', # Fake Allied Tech Center
-           b'fapw': 'A?', # Fake Advance Power
+           b'facf': ('C?', 'Fake Conyard'),
+           b'mslf': ('M?', 'Fake Missile Silo'),
+           b'fpwr': ('P?', 'Fake Power Plant'),
+           b'domf': ('R?', 'Fake Radar Dome'),
+           b'fixf': ('F?', 'Fake Service Depot'),
+           b'syrf': ('Y?', 'Fake Naval Yard'),
+           b'weaf': ('W?', 'Fake War Factory'),
+           b'tenf': ('X?', 'Fake Barracks'),
+           b'pdof': ('S?', 'Fake Chronosphere'),
+           b'atef': ('T?', 'Fake Tech Center'),
+           b'fapw': ('A?', 'Fake Advance Power')
            },{
-           b'e1': 'm', # Rifle ("Minigunner")
-           b'e2': 'g', # Gren
-           b'e3': 'r', # Rocket
-           b'e4': 'f', # Flamer
-           b'e6': 'e', # Engineer
-           b'e7': '!', # Tanya
-           b'medi': '+', # Medic
-           b'mech': '*', # Mechanic
-           b'dog': 'd', # Dog
-           b'shok': 's', # Shockie
-           b'thf': 't', # Thief
-           b'hijacker': 't', # Thief
-           b'spy': '?', # Spy
-           b'spy.england': '?', # Spy
+           b'e1': ('m', 'Rifle'), # "Minigunner"
+           b'e2': ('g', 'Gren'),
+           b'e3': ('r', 'Rocket'),
+           b'e4': ('f', 'Flamer'),
+           b'e6': ('e', 'Engineer'),
+           b'e7': ('!', 'Tanya'),
+           b'medi': ('+', 'Medic'),
+           b'mech': ('*', 'Mechanic'),
+           b'dog': ('d', 'Dog'),
+           b'shok': ('s', 'Shockie'),
+           b'thf': ('t', 'Thief'),
+           b'hijacker': ('t', 'Thief'),
+           b'spy': ('?', 'Spy'),
+           b'spy.england': ('?', 'Spy')
            },{
-           b'1tnk': 'lt', # Light Tank
-           b'2tnk': 'mt', # Medium Tank
-           b'3tnk': 'ht', # Heavy Tank
-           b'4tnk': 'ma', # Mammoth Tank
-           b'ftrk': 'ft', # Flak
-           b'apc': 'ap', # APC
-           b'harv': 'ha', # Harvester
-           b'jeep': 'ra', # Ranger
-           b'arty': 'ar', # Arti
-           b'ttnk': 'tt', # Tesla Tank
-           b'v2rl': 'v2', # V2
-           b'mnly': 'ml', # Minelayer
-           b'dtrk': 'dt', # Demo
-           b'mrj': 'rj', # Radar Jammer
-           b'mgg': 'mg', # Mobile Gap Generator
-           b'ctnk': 'ct', # Chrono Tank
-           b'stnk': 'pt', # Phase Transport
-           b'qtnk': '!t', # Mad Tank
-           b'truk': '$$', # Supply Truck
-           b'mcv': 'mc', # MCV
+           b'1tnk': ('lt', 'Light Tank'),
+           b'2tnk': ('mt', 'Medium Tank'),
+           b'3tnk': ('ht', 'Heavy Tank'),
+           b'4tnk': ('ma', 'Mammoth Tank'),
+           b'ftrk': ('ft', 'Flak'),
+           b'apc': ('ap', 'APC'),
+           b'harv': ('ha', 'Harvester'),
+           b'jeep': ('ra', 'Ranger'),
+           b'arty': ('ar', 'Arti'),
+           b'ttnk': ('tt', 'Tesla Tank'),
+           b'v2rl': ('v2', 'V2'),
+           b'mnly': ('ml', 'Minelayer'),
+           b'mnly.ap': ('ml', 'Minelayer'), # Anti-personel
+           b'mnly.at': ('ml', 'Minelayer'), # Anti-tank
+           b'dtrk': ('dt', 'Demo'),
+           b'mrj': ('rj', 'Radar Jammer'),
+           b'mgg': ('mg', 'Mobile Gap Generator'),
+           b'ctnk': ('ct', 'Chrono Tank'),
+           b'stnk': ('pt', 'Phase Transport'),
+           b'qtnk': ('!t', 'Mad Tank'),
+           b'truk': ('$$', 'Supply Truck'),
+           b'mcv': ('mc', 'MCV')
            },{
-           b'hind': 'hi', # Hind
-           b'mh60': 'bh', # Blackhawk
-           b'heli': 'lb', # Longbow
-           b'tran': 'ch', # Chinook
-           b'yak': 'yk', # Yak
-           b'mig': 'mi' # Mig
+           b'hind': ('hi', 'Hind'),
+           b'mh60': ('bh', 'Blackhawk'),
+           b'heli': ('lb', 'Longbow'),
+           b'tran': ('ch', 'Chinook'),
+           b'yak': ('yk', 'Yak'),
+           b'mig': ('mi', 'Mig')
            },{
-           b'ss': 'sub', # Submarine
-           b'msub': 'msb', # Missile Sub
-           b'dd': 'des', # Destroyer
-           b'ca': 'cru', # Cruiser
-           b'lst': 'tra', # Naval Transport
-           b'pt': 'gun' # Gunboat
+           b'ss': ('sub', 'Submarine'),
+           b'msub': ('msb', 'Missile Sub'),
+           b'dd': ('des', 'Destroyer'),
+           b'ca': ('cru', 'Cruiser'),
+           b'lst': ('tra', 'Naval Transport'),
+           b'pt': ('gun', 'Gunboat')
            }]
+# Generate the mapping from unified code to human readable name.
+itemNames = {}
+for items in itemMap:
+    for unifiedCode, name in items.values():
+        if unifiedCode in itemNames and itemNames[unifiedCode] != name:
+            raise Exception('Code {} maps to both {} and {}', unifiedCode, itemNames[unifiedCode], name)
+        elif unifiedCode not in itemNames:
+            itemNames[unifiedCode] = name
 
 ### Load the replay files. ###
 
@@ -224,9 +238,9 @@ for filename in filenames:
         
         Output the unified item code along with the index of the queue it came from.
         For example if the input is 'powr' then the output is 0, 'PP'."""
-        for q, queue in enumerate(itemMap):
-            if item in queue.keys():
-                return q, queue[item]
+        for q, items in enumerate(itemMap):
+            if item in items.keys():
+                return q, items[item][0]
         print('UNKNOWN:', item.decode('utf-8'), 'in', filename)
         raise Exception
     
@@ -302,13 +316,14 @@ for filename in filenames:
         field: The field name to search for (e.g. 'Color').
         start: The position to start the search from.
         Returns: The corresponding value (e.g. 'F5F872')."""
-        fieldStart = getPos(x, field + b': ', start)
+        fieldStart = getPos(x, field + b':', start)
         fieldEnd = getPos(x, b'\n', fieldStart)
-        return x[fieldStart:fieldEnd-1].decode('utf-8')
+        return x[fieldStart+1:fieldEnd-1].decode('utf-8')
 
     # Build information comes after the "StartGame" command.
     startGame = x.index(b'StartGame')
     
+    factionPicks = set()
     # Try to get player information.
     for playerId in [0, 1]:
         pos = -1
@@ -317,10 +332,16 @@ for filename in filenames:
             if pos >= len(x):
                 break
             playerPos = pos
+        name = getField(x, b'Name', playerPos)
+        outcome = getField(x, b'Outcome', playerPos)
+        clientIndex = int(getField(x, b'ClientIndex', playerPos))
+        faction = getField(x, b'FactionName', playerPos)
         fingerprint = getField(x, b'Fingerprint', playerPos)
         if fingerprint != '':
             if fingerprint not in fingerPrintToProfile:
                 response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
+                profileID = 'Unknown'
+                profileName = name
                 for line in response.text.split('\n'):
                     line = line.strip()
                     if line.startswith('ProfileID: '):
@@ -330,11 +351,7 @@ for filename in filenames:
                 fingerPrintToProfile[fingerprint] = {'profileID': profileID, 'profileName': profileName}
                 with open(FINGERPRINT_CACHE_FILE, 'a') as fingerprintCache:
                     fingerprintCache.write('{}\t{}\t{}\n'.format(fingerprint, profileID, profileName))
-                
-        name = getField(x, b'Name', playerPos)
-        outcome = getField(x, b'Outcome', playerPos)
-        clientIndex = int(getField(x, b'ClientIndex', playerPos))
-        faction = getField(x, b'FactionName', playerPos)
+
         pos = -1
         while True:
             pos = getPos(x, b'Client@%d:'%clientIndex, pos + 1)
@@ -342,6 +359,8 @@ for filename in filenames:
                 break
             clientPos = pos
         factionPick = getField(x, b'Faction', clientPos)
+        
+        factionPicks.add(factionPick)
         
         players.append({'fingerprint': fingerprint,
                         'name': name,
@@ -352,6 +371,11 @@ for filename in filenames:
                         'faction': faction,
                         'factionPick': factionPick,
                         'outcome': outcome})
+    if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
+        # Remove both players and skip processing the file.
+        players.pop()
+        players.pop()
+        continue
     
     events = defaultdict(lambda : defaultdict(list))
     startProductionTerm = b'StartProduction'
@@ -464,8 +488,8 @@ for q in sorted(unitList.keys()):
                     elif players[i]['outcome'] == 'Lost':
                         losses += 1
             winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
-            outStrs.append('{}: {} ({} builds, {} wins)'.format(item, count, wins + losses, winRate))
-    print(', '.join(outStrs))
+            outStrs.append('{}: {} ({} builds, {} wins)'.format(itemNames[item], count, wins + losses, winRate))
+    print('\n'.join(outStrs))
 
 def findPopularBuilds(builds, popularLimit=POPULAR):
     """Print a report of all popular build orders.
@@ -566,3 +590,51 @@ for position, count in positionCount.most_common():
     if count >= POPULARITY_FOR_BUILD_STATE:
         print(count, position)
         pass
+
+def factionResult(player, opponent):
+    if player['faction'] in ('England', 'France', 'Germany'):
+        faction = 'A'
+    else:
+        faction = 'S'
+    if opponent['faction'] in ('England', 'France', 'Germany'):
+        opponentFaction = 'A'
+    else:
+        opponentFaction = 'S'
+    pair = faction + opponentFaction
+    if player['outcome'] == 'Won':
+        return (pair, 1, 0)
+    elif player['outcome'] == 'Lost':
+        return (pair, 0, 1)
+    return (pair, 0, 0)
+
+# A report of best faction by player.
+print('=== Faction-Player Win Rates ===')
+print('Name             | Allies vs A  | Allies vs S  | Soviet vs A  | Soviet vs S  ')
+print('-----------------+--------------+--------------+--------------+--------------')
+for profileName in sorted(set(map(lambda player: player['profileName'], players))):
+    factionWins = defaultdict(int)
+    factionLosses = defaultdict(int)
+    for i in range(len(players) / 2):
+        playerA = players[2*i]
+        playerB = players[2*i+1]
+        if playerA['profileName'] == profileName:
+            pair, wins, losses = factionResult(playerA, playerB)
+            if profileName == 'ioverthoughtthis' and wins == 1:
+                print(playerA['filename'], playerA['fingerprint'])
+            factionWins[pair] += wins
+            factionLosses[pair] += losses
+        if playerB['profileName'] == profileName:
+            pair, wins, losses = factionResult(playerB, playerA)
+            if profileName == 'ioverthoughtthis' and wins == 1:
+                print(playerB['filename'], playerB['fingerprint'])
+            factionWins[pair] += wins
+            factionLosses[pair] += losses
+    factionWinRates = []
+    for pair in ['AA', 'AS', 'SA', 'SS']:
+        total = factionWins[pair] + factionLosses[pair]
+        if total == 0:
+            factionWinRates.append('            ')
+        else:
+            factionWinRates.append('{:2d}/{:2d} ({:3.0f}%)'.format(factionWins[pair], total, factionWins[pair] * 100.0 / total))
+    print(u'{:16s} | {}'.format(profileName, ' | '.join(factionWinRates)))
+
