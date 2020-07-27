@@ -67,7 +67,7 @@ for root, dirs, files in os.walk(path):
 # * The two airfields 'afld' and 'afld.ukraine' are both mapped to 'AF'.
 # * Infantry 'e1' to 'e7' are mapped to more representative characters.
 itemMap = [{
-           b'powr': ('PP', 'Powerplant'),
+           b'powr': ('PP', 'Power Plant'),
            b'tent': ('Rx', 'Barracks'), # Allies
            b'barr': ('Rx', 'Barracks'), # Soviet
            b'proc': ('Rf', 'Refinery'),
@@ -373,8 +373,7 @@ for filename in filenames:
                         'outcome': outcome})
     if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
         # Remove both players and skip processing the file.
-        players.pop()
-        players.pop()
+        players = players[:-2]
         continue
     
     events = defaultdict(lambda : defaultdict(list))
@@ -401,11 +400,21 @@ for filename in filenames:
             if cancelProductionPos == minPos:
                 player, q, eventList = getCancelProductionEvent(x, minPos)
                 for item in eventList:
-                    try:
-                        events[player][q].remove(item)
-                    except ValueError:
-                        # Cancelled something that wasn't being produced.
-                        pass
+                    # For buildings then we can only cancel production if it was not placed.
+                    unplaced = 0
+                    for event in events[player][q]:
+                        if event == item:
+                            unplaced += 1
+                        elif event == '[{}]'.format(item):
+                            unplaced -= 1
+                    if unplaced > 0:
+                        try:
+                            # Remove the last StartProduction event from the event list.
+                            latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
+                            events[player][q].pop(latestStartProductionIndex)
+                        except ValueError:
+                            # Cancelled something that wasn't being produced.
+                            pass
             else:
                 events[player][q] += eventList
             pos = minPos
@@ -415,7 +424,7 @@ for filename in filenames:
             print('Found game with {} player(s): {}'.format(len(events), filename))
             players = players[:-2]
             raise Exception
-            
+        
         for player in sorted(events.keys()):
             eventList = events[player]
             for q, queue in eventList.items():
@@ -456,7 +465,7 @@ factionWin['Allies'] = factionWin['England'] + factionWin['France'] + factionWin
 factionLoss['Allies'] = factionLoss['England'] + factionLoss['France'] + factionLoss['Germany']
 factionWin['Soviet'] = factionWin['Russia'] + factionWin['Ukraine']
 factionLoss['Soviet'] = factionLoss['Russia'] + factionLoss['Ukraine']
-print('Faction        Win Rate       From Random A/S     Picked Win Rate')
+print('Faction         Win Rate        From Random A/S      Picked Win Rate')
 for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
                     ('France', ('France', 'RandomAllies'), 'france'),
                     ('Germany', ('Germany', 'RandomAllies'), 'germany'),
@@ -467,10 +476,10 @@ for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
                     ('Random', '', '')]:
     factionReports = []
     for faction in factionTuple:
-        if faction in factionWin or faction in factionLoss:
-            factionReports.append('{: >3}/{: >3} {:0.0f}%'.format(factionWin[faction], (factionWin[faction] + factionLoss[faction]), factionWin[faction] * 100.0 / (factionWin[faction] + factionLoss[faction])))
+        if factionWin[faction] > 0 or factionLoss[faction] > 0:
+            factionReports.append('{: >3}/{: >3} {:3.0f}%'.format(factionWin[faction], (factionWin[faction] + factionLoss[faction]), factionWin[faction] * 100.0 / (factionWin[faction] + factionLoss[faction])))
         else:
-            factionReports.append('    ---    ')
+            factionReports.append('     ---    ')
     print('{: <12} {}'.format(factionTuple[0], '        '.join(factionReports)))
 
 # A report of the buildings and units that were queued, and how effective they were.
@@ -481,14 +490,22 @@ for q in sorted(unitList.keys()):
         if '[' not in item or ']' not in item:
             wins = 0
             losses = 0
+            unknown = 0
             for i, queue in enumerate(queues):
                 if item in queue[q]:
                     if players[i]['outcome'] == 'Won':
                         wins += 1
+                        continue
                     elif players[i]['outcome'] == 'Lost':
                         losses += 1
-            winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
-            outStrs.append('{}: {} ({} builds, {} wins)'.format(itemNames[item], count, wins + losses, winRate))
+                        continue
+                    else:
+                        unknown += 1
+                        continue
+            total = wins + losses + unknown
+            buildRate = '{:0.0f}%'.format(total * 100.0 / len(builds))
+            winRate = '---' if wins + losses == 0 else '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
+            outStrs.append('{}: {} ({} builds ({}), {} wins)'.format(itemNames[item], count, total, buildRate, winRate))
     print('\n'.join(outStrs))
 
 def findPopularBuilds(builds, popularLimit=POPULAR):
@@ -614,19 +631,15 @@ print('-----------------+--------------+--------------+--------------+----------
 for profileName in sorted(set(map(lambda player: player['profileName'], players))):
     factionWins = defaultdict(int)
     factionLosses = defaultdict(int)
-    for i in range(len(players) / 2):
+    for i in range(len(players) // 2):
         playerA = players[2*i]
         playerB = players[2*i+1]
         if playerA['profileName'] == profileName:
             pair, wins, losses = factionResult(playerA, playerB)
-            if profileName == 'ioverthoughtthis' and wins == 1:
-                print(playerA['filename'], playerA['fingerprint'])
             factionWins[pair] += wins
             factionLosses[pair] += losses
         if playerB['profileName'] == profileName:
             pair, wins, losses = factionResult(playerB, playerA)
-            if profileName == 'ioverthoughtthis' and wins == 1:
-                print(playerB['filename'], playerB['fingerprint'])
             factionWins[pair] += wins
             factionLosses[pair] += losses
     factionWinRates = []
