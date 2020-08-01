@@ -370,53 +370,58 @@ for filename in filenames:
                         'abbreviations': getAbbreviationsFromFilename(filename),
                         'faction': faction,
                         'factionPick': factionPick,
-                        'outcome': outcome})
+                        'outcome': outcome,
+                        'mapTitle': mapTitle})
     if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
         # Remove both players and skip processing the file.
         players = players[:-2]
         continue
     
     events = defaultdict(lambda : defaultdict(list))
-    startProductionTerm = b'StartProduction'
-    placeBuildingTerm = b'PlaceBuilding'
-    cancelProductionTerm = b'CancelProduction'
+    actionMap = {b'StartProduction': (getPos, getStartProductionEvents),
+                 b'PlaceBuilding': (getPlaceBuildingPos, getPlaceBuildingEvents),
+                 b'LineBuild': (getPos, getPlaceBuildingEvents),
+                 b'CancelProduction': (getPos, getCancelProductionEvent)}
     pos = startGame
     build = defaultdict(list)
     try:
         while True:
-            startProductionPos = getPos(x, startProductionTerm, pos)
-            placeBuildingPos = getPlaceBuildingPos(x, placeBuildingTerm, pos)
-            cancelProductionPos = getPos(x, cancelProductionTerm, pos)
-            minPos = min(startProductionPos, placeBuildingPos, cancelProductionPos)
+            # Find the next action of each type in the file.
+            posMap = {}
+            for term, functions in actionMap.items():
+                getPosFn = functions[0]
+                posMap[term] = getPosFn(x, term, pos)
+            minPos = min(posMap.values())
+            # Break if we're at the end of the file.
             if minPos == len(x):
                 break
-            if startProductionPos == minPos:
-                player, q, eventList = getStartProductionEvents(x, minPos)
-            if placeBuildingPos == minPos:
-                player, q, eventList = getPlaceBuildingEvents(x, minPos)
-                if q == 0:
-                    for item in eventList:
-                        build[player].append(item)
-            if cancelProductionPos == minPos:
-                player, q, eventList = getCancelProductionEvent(x, minPos)
-                for item in eventList:
-                    # For buildings then we can only cancel production if it was not placed.
-                    unplaced = 0
-                    for event in events[player][q]:
-                        if event == item:
-                            unplaced += 1
-                        elif event == '[{}]'.format(item):
-                            unplaced -= 1
-                    if unplaced > 0:
-                        try:
-                            # Remove the last StartProduction event from the event list.
-                            latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
-                            events[player][q].pop(latestStartProductionIndex)
-                        except ValueError:
-                            # Cancelled something that wasn't being produced.
-                            pass
-            else:
-                events[player][q] += eventList
+            # Execute the functions corresponding to the type of event.
+            for term, functions in actionMap.items():
+                if posMap[term] == minPos:
+                    getEventFn = functions[1]
+                    player, q, eventList = getEventFn(x, minPos)
+                    if term == b'PlaceBuilding' and q == 0:
+                        for item in eventList:
+                            build[player].append(item)
+                    if term == b'CancelProduction':
+                        for item in eventList:
+                            # For buildings then we can only cancel production if it was not placed.
+                            unplaced = 0
+                            for event in events[player][q]:
+                                if event == item:
+                                    unplaced += 1
+                                elif event == '[{}]'.format(item):
+                                    unplaced -= 1
+                            if unplaced > 0:
+                                try:
+                                    # Remove the last StartProduction event from the event list.
+                                    latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
+                                    events[player][q].pop(latestStartProductionIndex)
+                                except ValueError:
+                                    # Cancelled something that wasn't being produced.
+                                    pass
+                    else:
+                        events[player][q] += eventList
             pos = minPos
 
         if len(events) != 2:
@@ -430,7 +435,7 @@ for filename in filenames:
             for q, queue in eventList.items():
                 # Can be used to find which game contains an unusual item.
                 if ITEM_TO_FIND in queue:
-                    print(ITEM_TO_FIND, ' found in ', filename, mapTitle, 'Count:', queue.count(ITEM_TO_FIND))
+                    print('{} found in {} ({}) Count: {}'.format(ITEM_TO_FIND, filename, mapTitle, queue.count(ITEM_TO_FIND)))
                 #print(player, q, ','.join(queue))
                 unitList[q] += queue
             #if ''.join(build[player]).startswith('[PP][PP][PP]'):
