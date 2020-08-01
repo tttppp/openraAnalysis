@@ -15,14 +15,14 @@ Earlier seasons of RAGL do not use this, so automated player identification is m
 
 If you're interested in this then you might want to check out the following projects too:
 
-### AMHOL's Ruby parser: https://github.com/AMHOL/openra-ruby
+### [AMHOL's Ruby parser](https://github.com/AMHOL/openra-ruby)
 
 A tool to parse and extract data from replay files. This is reasonably comprehensive and works with many players and more than just the RA mod.
 
-### dragunoff's visualisation tool for use with the output of the Ruby parser: https://dragunoff.github.io/OpenRA-replay-analytics/
+### [dragunoff's visualisation tool for use with the output of the Ruby parser](https://dragunoff.github.io/OpenRA-replay-analytics/)
 
 A UI to produce easily digestible diagrams showing the build order with timing information.
 
-### Netnazgul's C++ parser: https://github.com/netnazgul/openra-replay-parser
+### [Netnazgul's C++ parser](https://github.com/netnazgul/openra-replay-parser)
 
 A tool to get some basic stats from the metadata at the end of the replay file, but using a UI.
