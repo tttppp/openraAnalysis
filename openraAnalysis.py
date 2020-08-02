@@ -210,6 +210,7 @@ builds = []
 queues = []
 unitList = defaultdict(list)
 players = []
+actions = []
 fingerPrintToProfile = loadCachedFingerprints()
 # Process each replay in turn.
 for filename in filenames:
@@ -272,6 +273,14 @@ for filename in filenames:
         q, item = outputEvent(item)
         return player, q, [item] * count
 
+    def getPauseProductionEvent(x, pos):
+        """Get information about a PauseProduction event. Return the player id, the queue index and the item(s)."""
+        l = bytesToInt(x[pos + 5])
+        player = getPlayer(x, pos)
+        item = x[pos + 6: pos + 6 + l]
+        q, item = outputEvent(item)
+        return player, q, [item]
+
     def getPos(x, term, start):
         """Search for a binary string and return the position just after it.
         
@@ -308,6 +317,16 @@ for filename in filenames:
                     placeBuildingPos = nextPlaceBuildingPos
                 nextPlaceBuildingPos = getPos(x, placeBuildingTerm, nextPlaceBuildingPos)
         return placeBuildingPos
+
+    def removeLastStartProductionEvent(events, player, q, item):
+        """Try to remove a specified "StartProduction" event from the player's queue."""
+        try:
+            # Remove the last StartProduction event from the event list.
+            latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
+            events[player][q].pop(latestStartProductionIndex)
+        except ValueError:
+            # Cancelled something that wasn't being produced.
+            pass
 
     def getField(x, field, start):
         """Search for the value of a field (e.g. 'Color: F5F872').
@@ -381,9 +400,11 @@ for filename in filenames:
     actionMap = {b'StartProduction': (getPos, getStartProductionEvents),
                  b'PlaceBuilding': (getPlaceBuildingPos, getPlaceBuildingEvents),
                  b'LineBuild': (getPos, getPlaceBuildingEvents),
-                 b'CancelProduction': (getPos, getCancelProductionEvent)}
+                 b'CancelProduction': (getPos, getCancelProductionEvent),
+                 b'PauseProduction': (getPos, getPauseProductionEvent)}
     pos = startGame
     build = defaultdict(list)
+    actionList = defaultdict(list)
     try:
         while True:
             # Find the next action of each type in the file.
@@ -400,10 +421,15 @@ for filename in filenames:
                 if posMap[term] == minPos:
                     getEventFn = functions[1]
                     player, q, eventList = getEventFn(x, minPos)
-                    if term == b'PlaceBuilding' and q == 0:
-                        for item in eventList:
-                            build[player].append(item)
-                    if term == b'CancelProduction':
+                    if term in [b'StartProduction', b'PlaceBuilding', b'LineBuild']:
+                        events[player][q] += eventList
+                        if term == b'PlaceBuilding' and q == 0:
+                            for item in eventList:
+                                build[player].append(item)
+                    elif term == b'PauseProduction':
+                        # Remove item from queue, it will be re-added by another StartProduction event.
+                        removeLastStartProductionEvent(events, player, q, item)
+                    elif term == b'CancelProduction':
                         for item in eventList:
                             # For buildings then we can only cancel production if it was not placed.
                             unplaced = 0
@@ -413,15 +439,8 @@ for filename in filenames:
                                 elif event == '[{}]'.format(item):
                                     unplaced -= 1
                             if unplaced > 0:
-                                try:
-                                    # Remove the last StartProduction event from the event list.
-                                    latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
-                                    events[player][q].pop(latestStartProductionIndex)
-                                except ValueError:
-                                    # Cancelled something that wasn't being produced.
-                                    pass
-                    else:
-                        events[player][q] += eventList
+                                removeLastStartProductionEvent(events, player, q, item)
+                    actionList[player].append((term, player, q, eventList))
             pos = minPos
 
         if len(events) != 2:
@@ -443,6 +462,7 @@ for filename in filenames:
             builds.append(build[player])
             buildsByMap[mapTitle].append(build[player])
             queues.append(eventList)
+            actions.append(actionList[player])
     except ZeroDivisionError:
         # Used for debugging.
         sys.tracebacklimit = 0
