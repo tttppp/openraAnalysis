@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 # TODO: Determine which player the DeployTransform command belongs to, and whether it's a deploy or an undeploy.
@@ -6,9 +6,11 @@
 from collections import defaultdict, Counter
 import os, sys
 import requests
+import json
+import datetime
 
 # Which RAGL season to analyse replays for.
-SEASON = 9
+SEASON = int(sys.argv[1])#9
 # The prefix that the RAGL files all begin with. This can be edited to further restrict input files to MASTERS or MINIONS.
 PREFIX = 'RAGL-S{:02d}-'.format(SEASON)
 # We only want to output "popular" builds. Ignore builds that happened less than this often:
@@ -22,6 +24,8 @@ ABRIDGE_OUTPUT = True
 ITEM_TO_FIND = None
 # This can be used to only look at particular matchups (e.g. Set it to set(['Random']) to look at Random v Random)
 FACTION_PICK_FILTER = None
+# Whether to create files containing the parsed replay data.
+DUMP_DATA = True
 
 # The location of the OpenRA support directory.
 # The support directory is where the game keeps the saved settings, maps, replays, logs and mod assets.  The default location is as follows, but one can choose to move it to an arbitrary location by passing an Engine.SupportDir argument to the Game.exe
@@ -210,6 +214,7 @@ builds = []
 queues = []
 unitList = defaultdict(list)
 players = []
+chats = []
 actions = []
 fingerPrintToProfile = loadCachedFingerprints()
 # Process each replay in turn.
@@ -219,15 +224,6 @@ for filename in filenames:
     x = f.read()
     f.close()
     
-    # Try to find the map name.
-    try:
-        mapTitleField = b'MapTitle: '
-        mapTitleIndex = x.index(mapTitleField) + len(mapTitleField)
-        mapTitle = x[mapTitleIndex:mapTitleIndex + x[mapTitleIndex:].index(b'\n')].decode('utf-8')
-    except:
-        print('No map title found in {} - replay corrupted?'.format(filename))
-        continue
-
     def getPlayer(x, pos):
         """Get the id of the player that gave the command."""
         if SEASON >= 9:
@@ -280,6 +276,26 @@ for filename in filenames:
         item = x[pos + 6: pos + 6 + l]
         q, item = outputEvent(item)
         return player, q, [item]
+
+    def getSupportPowerEvent(x, pos):
+        player = getPlayer(x, pos)
+        return player, None, None
+
+    def getChat(x, pos):
+        if SEASON < 9:
+            l = bytesToInt(x[pos])
+            message = x[pos + 1: pos + 1 + l].decode('utf-8')
+            clientIndex = x[pos + 1 + l]
+            globalChannel = (x[pos-8:pos] != b'TeamChat')
+        else:
+            # Messages in the global channel have channel == 4.
+            channel = x[pos]
+            globalChannel = (channel == 4)
+            l = bytesToInt(x[pos + 1])
+            message = x[pos + 2: pos + 2 + l].decode('utf-8')
+            clientOffset = (0 if globalChannel else 4)
+            clientIndex = x[pos + 2 + l + clientOffset]
+        return {'globalChannel': globalChannel, 'message': message, 'clientIndex': clientIndex}
 
     def getPos(x, term, start):
         """Search for a binary string and return the position just after it.
@@ -339,8 +355,27 @@ for filename in filenames:
         fieldEnd = getPos(x, b'\n', fieldStart)
         return x[fieldStart+1:fieldEnd-1].decode('utf-8')
 
+    def getDateFieldAsTimestamp(x, field, start):
+        value = getField(x, field, start)
+        return datetime.datetime.strptime(value, "%Y-%m-%d %H-%M-%S").timestamp()
+
     # Build information comes after the "StartGame" command.
     startGame = x.index(b'StartGame')
+    
+    # Get end game information.
+    rootPos = getPos(x, b'Root:', 0)
+    if rootPos >= len(x):
+        print('Unable to find end game information in {} - replay corrupted?'.format(filename))
+        continue
+    try:
+        finalGameTick = int(getField(x, b'FinalGameTick', rootPos))
+    except:
+        # Earlier releases did not include this field.
+        finalGameTick = None
+    mapTitle = getField(x, b'MapTitle', rootPos)
+    version = getField(x, b'Version', rootPos)
+    startTime = getDateFieldAsTimestamp(x, b'StartTimeUtc', rootPos)
+    endTime = getDateFieldAsTimestamp(x, b'EndTimeUtc', rootPos)
     
     factionPicks = set()
     # Try to get player information.
@@ -385,33 +420,62 @@ for filename in filenames:
                         'name': name,
                         'profileID': 'Unknown' if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileID'],
                         'profileName': name if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileName'],
+                        'clientIndex': clientIndex,
                         'filename': filename,
                         'abbreviations': getAbbreviationsFromFilename(filename),
                         'faction': faction,
                         'factionPick': factionPick,
                         'outcome': outcome,
-                        'mapTitle': mapTitle})
+                        'finalGameTick': finalGameTick,
+                        'startTime': startTime,
+                        'endTime': endTime,
+                        'mapTitle': mapTitle,
+                        'version': version})
     if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
         # Remove both players and skip processing the file.
         players = players[:-2]
         continue
+    
+    # Load any chat messages.
+    pos = 0
+    chat = []
+    while pos < len(x):
+        pos = getPos(x, b'Chat', pos)
+        if pos < len(x):
+            try:
+                chat.append(getChat(x, pos))
+            except UnicodeDecodeError:
+                # Silently ignore chat message if it can't be decoded.
+                pass
+    chats.append(chat)
     
     events = defaultdict(lambda : defaultdict(list))
     actionMap = {b'StartProduction': (getPos, getStartProductionEvents),
                  b'PlaceBuilding': (getPlaceBuildingPos, getPlaceBuildingEvents),
                  b'LineBuild': (getPos, getPlaceBuildingEvents),
                  b'CancelProduction': (getPos, getCancelProductionEvent),
-                 b'PauseProduction': (getPos, getPauseProductionEvent)}
+                 b'PauseProduction': (getPos, getPauseProductionEvent),
+                 b'SovietSpyPlane': (getPos, getSupportPowerEvent),
+                 b'SovietParatroopers': (getPos, getSupportPowerEvent),
+                 b'UkraineParabombs': (getPos, getSupportPowerEvent),
+                 b'Chronoshift': (getPos, getSupportPowerEvent),
+                 # Iron Curtain comes from two different events (depending on OpenRA release).
+                 b'GrantExternalConditionPowerInfoOrder': (getPos, getSupportPowerEvent),
+                 b'GrantUpgradePowerInfoOrder': (getPos, getSupportPowerEvent),
+                 b'NukePowerInfoOrder': (getPos, getSupportPowerEvent),
+                 # Sonar Pulse
+                 b'SpawnActorPowerInfoOrder': (getPos, getSupportPowerEvent)}
     pos = startGame
     build = defaultdict(list)
     actionList = defaultdict(list)
+    posMap = {}
     try:
         while True:
             # Find the next action of each type in the file.
-            posMap = {}
             for term, functions in actionMap.items():
-                getPosFn = functions[0]
-                posMap[term] = getPosFn(x, term, pos)
+                if term not in posMap:
+                    getPosFn = functions[0]
+                    posMap[term] = getPosFn(x, term, pos)
             minPos = min(posMap.values())
             # Break if we're at the end of the file.
             if minPos == len(x):
@@ -419,6 +483,8 @@ for filename in filenames:
             # Execute the functions corresponding to the type of event.
             for term, functions in actionMap.items():
                 if posMap[term] == minPos:
+                    # Reset this entry in posMap so that we look for the next matching term next iteration.
+                    del posMap[term]
                     getEventFn = functions[1]
                     player, q, eventList = getEventFn(x, minPos)
                     if term in [b'StartProduction', b'PlaceBuilding', b'LineBuild']:
@@ -440,7 +506,7 @@ for filename in filenames:
                                     unplaced -= 1
                             if unplaced > 0:
                                 removeLastStartProductionEvent(events, player, q, item)
-                    actionList[player].append((term, player, q, eventList))
+                    actionList[player].append((term.decode('utf-8'), q, eventList))
             pos = minPos
 
         if len(events) != 2:
@@ -461,7 +527,8 @@ for filename in filenames:
             #    print(filename, mapTitle)
             builds.append(build[player])
             buildsByMap[mapTitle].append(build[player])
-            queues.append(eventList)
+            # Convert defaultdict to list.
+            queues.append(list(map(lambda q: eventList[q], range(len(itemMap)))))
             actions.append(actionList[player])
     except ZeroDivisionError:
         # Used for debugging.
@@ -676,3 +743,14 @@ for profileName in sorted(set(map(lambda player: player['profileName'], players)
             factionWinRates.append('{:2d}/{:2d} ({:3.0f}%)'.format(factionWins[pair], total, factionWins[pair] * 100.0 / total))
     print(u'{:16s} | {}'.format(profileName, ' | '.join(factionWinRates)))
 
+if DUMP_DATA:
+    with open('builds.{}.json'.format(SEASON), 'w') as f:
+        json.dump(builds, f)
+    with open('players.{}.json'.format(SEASON), 'w') as f:
+        json.dump(players, f)
+    with open('chats.{}.json'.format(SEASON), 'w') as f:
+        json.dump(chats, f)
+    with open('queues.{}.json'.format(SEASON), 'w') as f:
+        json.dump(queues, f)
+    with open('actions.{}.json'.format(SEASON), 'w') as f:
+        json.dump(actions, f)
