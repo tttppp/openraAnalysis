@@ -281,12 +281,25 @@ for filename in filenames:
         player = getPlayer(x, pos)
         return player, None, None
 
+    def getPauseGameEvent(x, pos):
+        if SEASON >= 9:
+            # This isn't right - it always comes back as 4.
+            player = getPlayer(x, pos - 1)
+        else:
+            # Skip four bytes of 0xff
+            pos += 4
+            # This isn't right - it always comes back as 4.
+            player = getPlayer(x, pos)
+        l = bytesToInt(x[pos + 1])
+        action = x[pos + 2: pos + 2 + l].decode('utf-8')
+        return player, None, [action]
+
     def getChat(x, pos):
         if SEASON < 9:
             l = bytesToInt(x[pos])
             message = x[pos + 1: pos + 1 + l].decode('utf-8')
-            clientIndex = x[pos + 1 + l]
             globalChannel = (x[pos-8:pos] != b'TeamChat')
+            clientIndex = x[pos - (18 if globalChannel else 22)]
         else:
             # Messages in the global channel have channel == 4.
             channel = x[pos]
@@ -353,11 +366,23 @@ for filename in filenames:
         Returns: The corresponding value (e.g. 'F5F872')."""
         fieldStart = getPos(x, field + b':', start)
         fieldEnd = getPos(x, b'\n', fieldStart)
-        return x[fieldStart+1:fieldEnd-1].decode('utf-8')
+        # Some replay files seem to have some corrupted characters at the end.
+        while fieldEnd - 1 > fieldStart + 1:
+            try:
+                value = x[fieldStart+1:fieldEnd-1].decode('utf-8')
+                return value
+            except ValueError:
+                fieldEnd -= 1
+        # If we couldn't find a sensible value for the field then return an empty string.
+        return ''
 
     def getDateFieldAsTimestamp(x, field, start):
         value = getField(x, field, start)
-        return datetime.datetime.strptime(value, "%Y-%m-%d %H-%M-%S").timestamp()
+        try:
+            return datetime.datetime.strptime(value[:19], "%Y-%m-%d %H-%M-%S").timestamp()
+        except ValueError:
+            # Undefined outcomes have dates that are intentionally set to an invalid year (0000).
+            return None
 
     # Build information comes after the "StartGame" command.
     startGame = x.index(b'StartGame')
@@ -391,6 +416,12 @@ for filename in filenames:
         clientIndex = int(getField(x, b'ClientIndex', playerPos))
         faction = getField(x, b'FactionName', playerPos)
         fingerprint = getField(x, b'Fingerprint', playerPos)
+        try:
+            outcomeTime = getDateFieldAsTimestamp(x, b'OutcomeTimestampUtc', playerPos)
+        except ValueError:
+            # If no one was eliminated.
+            outcomeTime = None
+            raise
         if fingerprint != '':
             if fingerprint not in fingerPrintToProfile:
                 response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
@@ -428,6 +459,7 @@ for filename in filenames:
                         'outcome': outcome,
                         'finalGameTick': finalGameTick,
                         'startTime': startTime,
+                        'outcomeTime': outcomeTime,
                         'endTime': endTime,
                         'mapTitle': mapTitle,
                         'version': version})
@@ -464,7 +496,8 @@ for filename in filenames:
                  b'GrantUpgradePowerInfoOrder': (getPos, getSupportPowerEvent),
                  b'NukePowerInfoOrder': (getPos, getSupportPowerEvent),
                  # Sonar Pulse
-                 b'SpawnActorPowerInfoOrder': (getPos, getSupportPowerEvent)}
+                 b'SpawnActorPowerInfoOrder': (getPos, getSupportPowerEvent),
+                 b'PauseGame': (getPos, getPauseGameEvent)}
     pos = startGame
     build = defaultdict(list)
     actionList = defaultdict(list)
@@ -513,6 +546,7 @@ for filename in filenames:
             # Probably one of the players gave no orders.
             print('Found game with {} player(s): {}'.format(len(events), filename))
             players = players[:-2]
+            chats = chats[:-1]
             raise Exception
         
         for player in sorted(events.keys()):
@@ -745,12 +779,12 @@ for profileName in sorted(set(map(lambda player: player['profileName'], players)
 
 if DUMP_DATA:
     with open('builds.{}.json'.format(SEASON), 'w') as f:
-        json.dump(builds, f)
+        json.dump(builds, f, indent=2)
     with open('players.{}.json'.format(SEASON), 'w') as f:
-        json.dump(players, f)
+        json.dump(players, f, indent=2)
     with open('chats.{}.json'.format(SEASON), 'w') as f:
-        json.dump(chats, f)
+        json.dump(chats, f, indent=2)
     with open('queues.{}.json'.format(SEASON), 'w') as f:
-        json.dump(queues, f)
+        json.dump(queues, f, indent=2)
     with open('actions.{}.json'.format(SEASON), 'w') as f:
-        json.dump(actions, f)
+        json.dump(actions, f, indent=2)
