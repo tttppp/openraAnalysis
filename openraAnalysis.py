@@ -7,7 +7,7 @@ from collections import defaultdict, Counter
 import os, sys
 import requests
 import json
-import datetime
+import datetime, time
 
 # Which RAGL season to analyse replays for.
 SEASON = int(sys.argv[1])#9
@@ -379,7 +379,8 @@ for filename in filenames:
     def getDateFieldAsTimestamp(x, field, start):
         value = getField(x, field, start)
         try:
-            return datetime.datetime.strptime(value[:19], "%Y-%m-%d %H-%M-%S").timestamp()
+            # This is compatible with Python 2 and 3.
+            return time.mktime(datetime.datetime.strptime(value[:19], '%Y-%m-%d %H-%M-%S').timetuple())
         except ValueError:
             # Undefined outcomes have dates that are intentionally set to an invalid year (0000).
             return None
@@ -529,7 +530,21 @@ for filename in filenames:
                         # Remove item from queue, it will be re-added by another StartProduction event.
                         removeLastStartProductionEvent(events, player, q, item)
                     elif term == b'CancelProduction':
-                        for item in eventList:
+                        # If the previous cancelled amount of this unit was not 1 or 5 then it must have been all of the items.
+                        maxCancelled = 0
+                        itemCancelled = eventList[0]
+                        numberCancelled = len(eventList)
+                        for actionTerm, actionQ, actionEventList in actionList[player]:
+                            if actionTerm == 'StartProduction' and actionQ == q and actionEventList[0] == itemCancelled:
+                                maxCancelled += len(actionEventList)
+                            elif actionTerm == 'CancelProduction' and actionQ == q and actionEventList[0] == itemCancelled:
+                                # If the previous cancelled amount of this unit was 1 or 5 then assume only some were cancelled.
+                                if len(actionEventList) == 1 or len(actionEventList) == 5:
+                                    maxCancelled = max(0, maxCancelled - len(actionEventList))
+                                else:
+                                    # Otherwise the whole queue was cancelled, so no more can be cancelled in future.
+                                    maxCancelled = 0
+                        for item in eventList[:maxCancelled]:
                             # For buildings then we can only cancel production if it was not placed.
                             unplaced = 0
                             for event in events[player][q]:
