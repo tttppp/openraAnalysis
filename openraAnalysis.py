@@ -9,10 +9,36 @@ import requests
 import json
 import datetime, time
 
-# Which RAGL season to analyse replays for.
-SEASON = int(sys.argv[1])#9
-# The prefix that the RAGL files all begin with. This can be edited to further restrict input files to MASTERS or MINIONS.
-PREFIX = 'RAGL-S{:02d}-'.format(SEASON)
+RAGL = True
+
+if not RAGL:
+    # E.g. For a one-day tournament.
+    PREFIX = 'OpenRA-2020-09-05'
+    MOD = 'cnc'
+    RELEASE = 'release-20200503'
+else:
+    # Which RAGL season to analyse replays for.
+    SEASON = int(sys.argv[1])#9
+    # The prefix that the RAGL files all begin with. This can be edited to further restrict input files to MASTERS or MINIONS.
+    PREFIX = 'RAGL-S{:02d}-'.format(SEASON)
+    MOD = 'ra'
+    if SEASON == 1:
+        RELEASE = 'release-20151224'
+    elif SEASON in [2, 3]:
+        RELEASE = 'release-20161019'
+    elif SEASON == 4:
+        RELEASE = 'release-20170527'
+    elif SEASON == 5:
+        RELEASE = 'release-20180307'
+    elif SEASON == 6:
+        RELEASE = 'release-20180923'
+    elif SEASON in [7, 8]:
+        RELEASE = 'release-20190314'
+    elif SEASON == 9:
+        RELEASE = 'release-20200503'
+    else:
+        print('Unknown RAGL season', SEASON)
+        raise Exception
 # We only want to output "popular" builds. Ignore builds that happened less than this often:
 POPULAR = 20
 POPULAR_FOR_MAP = 10
@@ -38,23 +64,7 @@ DUMP_DATA = True
 OPENRA_SUPPORT_DIRECTORY = '{}/.openra'.format(os.path.expanduser('~'))
 
 # Load the replays from the corresponding location for the RAGL season.
-if SEASON == 1:
-    path = '{}/Replays/ra/release-20151224/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON in [2, 3]:
-    path = '{}/Replays/ra/release-20161019/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 4:
-    path = '{}/Replays/ra/release-20170527/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 5:
-    path = '{}/Replays/ra/release-20180307/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 6:
-    path = '{}/Replays/ra/release-20180923/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON in [7, 8]:
-    path = '{}/Replays/ra/release-20190314/'.format(OPENRA_SUPPORT_DIRECTORY)
-elif SEASON == 9:
-    path = '{}/Replays/ra/release-20200503/'.format(OPENRA_SUPPORT_DIRECTORY)
-else:
-    print('Unknown season', SEASON)
-    raise Exception
+path = '{}/Replays/{}/{}/'.format(OPENRA_SUPPORT_DIRECTORY, MOD, RELEASE)
 
 # A local file to store the responses from the OpenRA forum fingerprint endpoint.
 FINGERPRINT_CACHE_FILE = 'fingerprint.cache'
@@ -70,104 +80,167 @@ for root, dirs, files in os.walk(path):
 # A couple of examples:
 # * The two airfields 'afld' and 'afld.ukraine' are both mapped to 'AF'.
 # * Infantry 'e1' to 'e7' are mapped to more representative characters.
-itemMap = [{
-           b'powr': ('PP', 'Power Plant'),
-           b'tent': ('Rx', 'Barracks'), # Allies
-           b'barr': ('Rx', 'Barracks'), # Soviet
-           b'proc': ('Rf', 'Refinery'),
-           b'weap': ('WF', 'War Factory'),
-           b'fix': ('SD', 'Service Depot'),
-           b'dome': ('RD', 'Radar Dome'),
-           b'hpad': ('HP', 'Helipad'),
-           b'afld': ('AF', 'Airfield'),
-           b'afld.ukraine': ('AF', 'Airfield'),
-           b'apwr': ('AP', 'Advanced Power Plant'),
-           b'kenn': ('Ke', 'Kennel'),
-           b'stek': ('TC', 'Tech Centre'), # Soviet
-           b'atek': ('TC', 'Tech Centre'), # Allies
-           b'spen': ('SP', 'Sub Pen'),
-           b'syrd': ('NY', 'Naval Yard')
-           },{
-           b'pbox': ('PB', 'Pillbox'),
-           b'hbox': ('CP', 'Camo Pillbox'),
-           b'gun': ('Tu', 'Turret'),
-           b'ftur': ('FT', 'Flame Tower'),
-           b'tsla': ('Ts', 'Teslacoil'),
-           b'agun': ('AA', 'AA Gun'),
-           b'sam': ('Sa', 'SAM Site'),
-           b'gap': ('GG', 'Gap Generator'),
-           b'pdox': ('Cs', 'Chronosphere'),
-           b'iron': ('IC', 'Iron Curtain'),
-           b'mslo': ('MS', 'Missile Silo'),
-           b'fenc': ('--', 'Fence'), # Barbed Wire Fence
-           b'sbag': ('--', 'Fence'), # Sandbag
-           b'brik': ('==', 'Concrete Wall'),
-           b'silo': ('Si', 'Silo'),
-           # Fakes
-           b'facf': ('C?', 'Fake Conyard'),
-           b'mslf': ('M?', 'Fake Missile Silo'),
-           b'fpwr': ('P?', 'Fake Power Plant'),
-           b'domf': ('R?', 'Fake Radar Dome'),
-           b'fixf': ('F?', 'Fake Service Depot'),
-           b'syrf': ('Y?', 'Fake Naval Yard'),
-           b'weaf': ('W?', 'Fake War Factory'),
-           b'tenf': ('X?', 'Fake Barracks'),
-           b'pdof': ('S?', 'Fake Chronosphere'),
-           b'atef': ('T?', 'Fake Tech Center'),
-           b'fapw': ('A?', 'Fake Advance Power')
-           },{
-           b'e1': ('m', 'Rifle'), # "Minigunner"
-           b'e2': ('g', 'Gren'),
-           b'e3': ('r', 'Rocket'),
-           b'e4': ('f', 'Flamer'),
-           b'e6': ('e', 'Engineer'),
-           b'e7': ('!', 'Tanya'),
-           b'medi': ('+', 'Medic'),
-           b'mech': ('*', 'Mechanic'),
-           b'dog': ('d', 'Dog'),
-           b'shok': ('s', 'Shockie'),
-           b'thf': ('t', 'Thief'),
-           b'hijacker': ('t', 'Thief'),
-           b'spy': ('?', 'Spy'),
-           b'spy.england': ('?', 'Spy')
-           },{
-           b'1tnk': ('lt', 'Light Tank'),
-           b'2tnk': ('mt', 'Medium Tank'),
-           b'3tnk': ('ht', 'Heavy Tank'),
-           b'4tnk': ('ma', 'Mammoth Tank'),
-           b'ftrk': ('ft', 'Flak'),
-           b'apc': ('ap', 'APC'),
-           b'harv': ('ha', 'Harvester'),
-           b'jeep': ('ra', 'Ranger'),
-           b'arty': ('ar', 'Arti'),
-           b'ttnk': ('tt', 'Tesla Tank'),
-           b'v2rl': ('v2', 'V2'),
-           b'mnly': ('ml', 'Minelayer'),
-           b'mnly.ap': ('ml', 'Minelayer'), # Anti-personel
-           b'mnly.at': ('ml', 'Minelayer'), # Anti-tank
-           b'dtrk': ('dt', 'Demo'),
-           b'mrj': ('rj', 'Radar Jammer'),
-           b'mgg': ('mg', 'Mobile Gap Generator'),
-           b'ctnk': ('ct', 'Chrono Tank'),
-           b'stnk': ('pt', 'Phase Transport'),
-           b'qtnk': ('!t', 'Mad Tank'),
-           b'truk': ('$$', 'Supply Truck'),
-           b'mcv': ('mc', 'MCV')
-           },{
-           b'hind': ('hi', 'Hind'),
-           b'mh60': ('bh', 'Blackhawk'),
-           b'heli': ('lb', 'Longbow'),
-           b'tran': ('ch', 'Chinook'),
-           b'yak': ('yk', 'Yak'),
-           b'mig': ('mi', 'Mig')
-           },{
-           b'ss': ('sub', 'Submarine'),
-           b'msub': ('msb', 'Missile Sub'),
-           b'dd': ('des', 'Destroyer'),
-           b'ca': ('cru', 'Cruiser'),
-           b'lst': ('tra', 'Naval Transport'),
-           b'pt': ('gun', 'Gunboat')
-           }]
+if MOD == 'ra':
+    itemMap = [{
+               b'powr': ('PP', 'Power Plant'),
+               b'tent': ('Rx', 'Barracks'), # Allies
+               b'barr': ('Rx', 'Barracks'), # Soviet
+               b'proc': ('Rf', 'Refinery'),
+               b'weap': ('WF', 'War Factory'),
+               b'fix': ('SD', 'Service Depot'),
+               b'dome': ('RD', 'Radar Dome'),
+               b'hpad': ('HP', 'Helipad'),
+               b'afld': ('AF', 'Airfield'),
+               b'afld.ukraine': ('AF', 'Airfield'),
+               b'apwr': ('AP', 'Advanced Power Plant'),
+               b'kenn': ('Ke', 'Kennel'),
+               b'stek': ('TC', 'Tech Centre'), # Soviet
+               b'atek': ('TC', 'Tech Centre'), # Allies
+               b'spen': ('SP', 'Sub Pen'),
+               b'syrd': ('NY', 'Naval Yard')
+               },{
+               b'pbox': ('PB', 'Pillbox'),
+               b'hbox': ('CP', 'Camo Pillbox'),
+               b'gun': ('Tu', 'Turret'),
+               b'ftur': ('FT', 'Flame Tower'),
+               b'tsla': ('Ts', 'Teslacoil'),
+               b'agun': ('AA', 'AA Gun'),
+               b'sam': ('Sa', 'SAM Site'),
+               b'gap': ('GG', 'Gap Generator'),
+               b'pdox': ('Cs', 'Chronosphere'),
+               b'iron': ('IC', 'Iron Curtain'),
+               b'mslo': ('MS', 'Missile Silo'),
+               b'fenc': ('--', 'Fence'), # Barbed Wire Fence
+               b'sbag': ('--', 'Fence'), # Sandbag
+               b'brik': ('==', 'Concrete Wall'),
+               b'silo': ('Si', 'Silo'),
+               # Fakes
+               b'facf': ('C?', 'Fake Conyard'),
+               b'mslf': ('M?', 'Fake Missile Silo'),
+               b'fpwr': ('P?', 'Fake Power Plant'),
+               b'domf': ('R?', 'Fake Radar Dome'),
+               b'fixf': ('F?', 'Fake Service Depot'),
+               b'syrf': ('Y?', 'Fake Naval Yard'),
+               b'weaf': ('W?', 'Fake War Factory'),
+               b'tenf': ('X?', 'Fake Barracks'),
+               b'pdof': ('S?', 'Fake Chronosphere'),
+               b'atef': ('T?', 'Fake Tech Center'),
+               b'fapw': ('A?', 'Fake Advance Power')
+               },{
+               b'e1': ('m', 'Rifle'), # "Minigunner"
+               b'e2': ('g', 'Gren'),
+               b'e3': ('r', 'Rocket'),
+               b'e4': ('f', 'Flamer'),
+               b'e6': ('e', 'Engineer'),
+               b'e7': ('!', 'Tanya'),
+               b'medi': ('+', 'Medic'),
+               b'mech': ('*', 'Mechanic'),
+               b'dog': ('d', 'Dog'),
+               b'shok': ('s', 'Shockie'),
+               b'thf': ('t', 'Thief'),
+               b'hijacker': ('t', 'Thief'),
+               b'spy': ('?', 'Spy'),
+               b'spy.england': ('?', 'Spy')
+               },{
+               b'1tnk': ('lt', 'Light Tank'),
+               b'2tnk': ('mt', 'Medium Tank'),
+               b'3tnk': ('ht', 'Heavy Tank'),
+               b'4tnk': ('ma', 'Mammoth Tank'),
+               b'ftrk': ('ft', 'Flak'),
+               b'apc': ('ap', 'APC'),
+               b'harv': ('ha', 'Harvester'),
+               b'jeep': ('ra', 'Ranger'),
+               b'arty': ('ar', 'Arti'),
+               b'ttnk': ('tt', 'Tesla Tank'),
+               b'v2rl': ('v2', 'V2'),
+               b'mnly': ('ml', 'Minelayer'),
+               b'mnly.ap': ('ml', 'Minelayer'), # Anti-personel
+               b'mnly.at': ('ml', 'Minelayer'), # Anti-tank
+               b'dtrk': ('dt', 'Demo'),
+               b'mrj': ('rj', 'Radar Jammer'),
+               b'mgg': ('mg', 'Mobile Gap Generator'),
+               b'ctnk': ('ct', 'Chrono Tank'),
+               b'stnk': ('pt', 'Phase Transport'),
+               b'qtnk': ('!t', 'Mad Tank'),
+               b'truk': ('$$', 'Supply Truck'),
+               b'mcv': ('mc', 'MCV')
+               },{
+               b'hind': ('hi', 'Hind'),
+               b'mh60': ('bh', 'Blackhawk'),
+               b'heli': ('lb', 'Longbow'),
+               b'tran': ('ch', 'Chinook'),
+               b'yak': ('yk', 'Yak'),
+               b'mig': ('mi', 'Mig')
+               },{
+               b'ss': ('sub', 'Submarine'),
+               b'msub': ('msb', 'Missile Sub'),
+               b'dd': ('des', 'Destroyer'),
+               b'ca': ('cru', 'Cruiser'),
+               b'lst': ('tra', 'Naval Transport'),
+               b'pt': ('gun', 'Gunboat')
+               }]
+elif MOD == 'cnc':
+    itemMap = [{
+               b'afld': ('As', 'Airstrip'),
+               b'fact': ('fact', 'Factory'),
+               b'eye': ('eye', 'Advanced Comm'),
+               b'fix': ('RF', 'Repair Facility'),
+               b'hand': ('Rx', 'Barracks'),
+               b'hpad': ('hpad', 'Helipad'),
+               b'hq': ('Co', 'Comms'),
+               b'miss': ('TC', 'Tech Centre'),
+               b'proc': ('Rf', 'Ref'),
+               b'pyle': ('Rx', 'Barracks'),
+               b'nuke': ('PP', 'Power Plant'),
+               b'nuk2': ('AP', 'APP'),
+               b'tmpl': ('TN', 'Temple of Nod'),
+               b'weap': ('weap', 'weap')
+               },{
+               b'atwr': ('AT', 'AGT'),
+               b'brik': ('==', 'Wall'),
+               b'sbag': ('--', 'Fence'),
+               b'barb': ('--', 'Fence'),
+               b'cycl': ('cycl', 'cycl'),
+               b'gtwr': ('GT', 'Guard Tower'),
+               b'gun': ('Tu', 'Turret'),
+               b'obli': ('Ob', 'Obelisk'),
+               b'sam': ('SA', 'SAM'),
+               b'silo': ('silo', 'Silo'),
+               b'wood': ('wood', 'wood')
+               },{
+               b'e1': ('m', 'Minigunner'),
+               b'e2': ('g', 'Gren'),
+               b'e3': ('r', 'Rocket'),
+               b'e4': ('f', 'Flamer'),
+               b'e5': ('c', 'Chem'),
+               b'e6': ('e', 'Engi'),
+               b'e6': ('e', 'Engi'),
+               b'rmbo': ('!', 'Commando'),
+               },{
+               b'harv': ('ha', 'Harvester'),
+               b'apc': ('ap', 'APC'),
+               b'arty': ('ar', 'Arti'),
+               b'bggy': ('bu', 'Buggy'),
+               b'bike': ('bi', 'Bike'),
+               b'ftnk': ('ft', 'Flame Tank'),
+               b'htnk': ('ma', 'Mammoth'),
+               b'jeep': ('hv', 'Hum-Vee'),
+               b'lst': ('ho', 'Hovercraft'),
+               b'ltnk': ('lt', 'Light Tank'),
+               b'mcv': ('mc', 'MCV'),
+               b'mhq': ('mh', 'MHQ'),
+               b'mlrs': ('ms', 'Mobile SAM'),
+               b'msam': ('rl', 'Rocket Launcher'),
+               b'mtnk': ('mt', 'Medium Tank'),
+               b'stnk': ('st', 'Stealth Tank'),
+               b'truck': ('$$', 'Supply Truck')
+               },{
+               b'heli': ('apa', 'Apache'),
+               b'orca': ('orc', 'Orca'),
+               },{
+               }]
+else:
+    raise Exception('No item mapping for mod: {}'.format(MOD))
 # Generate the mapping from unified code to human readable name.
 itemNames = {}
 for items in itemMap:
@@ -224,9 +297,20 @@ for filename in filenames:
     x = f.read()
     f.close()
     
+    def getInt(x, pos):
+        """Combine the four bytes starting at pos as a little endian integer."""
+        total = 0;
+        for i in range(4):
+            total += x[pos + i] * (256 ** i)
+        return total
+    
+    def getClientId(x, pos):
+        """Get the client id that gave the command."""
+        return getInt(x, pos)
+    
     def getPlayer(x, pos):
         """Get the id of the player that gave the command."""
-        if SEASON >= 9:
+        if RELEASE >= 'release-20200503':
             return x[pos+1]
         return x[pos]
     
@@ -254,7 +338,7 @@ for filename in filenames:
         """Get information about a PlaceBuilding event. Return the player id, the queue index and the item."""
         player = getPlayer(x, pos)
         # Different OpenRA releases have slightly different offsets.
-        offset = (17 if SEASON <= 4 else (19 if SEASON <= 6 else 11))
+        offset = (17 if RELEASE <= 'release-20170527' else (19 if RELEASE <= 'release-20180923' else 11))
         l = bytesToInt(x[pos + offset])
         item = x[pos + offset + 1: pos + offset + 1 + l]
         q, item = outputEvent(item)
@@ -282,7 +366,7 @@ for filename in filenames:
         return player, None, None
 
     def getPauseGameEvent(x, pos):
-        if SEASON >= 9:
+        if RELEASE >= 'release-20200503':
             # This isn't right - it always comes back as 4.
             player = getPlayer(x, pos - 1)
         else:
@@ -295,11 +379,11 @@ for filename in filenames:
         return player, None, [action]
 
     def getChat(x, pos):
-        if SEASON < 9:
+        if RELEASE < 'release-20200503':
             l = bytesToInt(x[pos])
             message = x[pos + 1: pos + 1 + l].decode('utf-8')
             globalChannel = (x[pos-8:pos] != b'TeamChat')
-            clientIndex = x[pos - (18 if globalChannel else 22)]
+            clientIndex = getClientId(x, pos - (18 if globalChannel else 22))
         else:
             # Messages in the global channel have channel == 4.
             channel = x[pos]
@@ -307,7 +391,7 @@ for filename in filenames:
             l = bytesToInt(x[pos + 1])
             message = x[pos + 2: pos + 2 + l].decode('utf-8')
             clientOffset = (0 if globalChannel else 4)
-            clientIndex = x[pos + 2 + l + clientOffset]
+            clientIndex = getClientId(x, pos + 2 + l + clientOffset)
         return {'globalChannel': globalChannel, 'message': message, 'clientIndex': clientIndex}
 
     def getPos(x, term, start):
@@ -468,6 +552,11 @@ for filename in filenames:
         # Remove both players and skip processing the file.
         players = players[:-2]
         continue
+    
+    # Store the client id to player id mapping.
+    clientToPlayerMap = {}
+    for player in players:
+        clientToPlayerMap[player['clientIndex']] = player
     
     # Load any chat messages.
     pos = 0
