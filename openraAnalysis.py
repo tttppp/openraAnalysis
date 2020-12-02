@@ -165,7 +165,7 @@ if MOD == 'ra':
                b'truk': ('$$', 'Supply Truck'),
                b'mcv': ('mc', 'MCV')
                },{
-               b'hind': ('hi', 'Hind'),
+               b'hind': ('bh', 'Blackhawk'), # Pretend Hinds were always called Blackhawks.
                b'mh60': ('bh', 'Blackhawk'),
                b'heli': ('lb', 'Longbow'),
                b'tran': ('ch', 'Chinook'),

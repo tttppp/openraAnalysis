@@ -80,7 +80,6 @@ itemNames = {'!': 'Tanya',
  'g': 'Gren',
  'gun': 'Gunboat',
  'ha': 'Harvester',
- 'hi': 'Hind',
  'ht': 'Heavy Tank',
  'lb': 'Longbow',
  'lt': 'Light Tank',
@@ -207,6 +206,35 @@ def standardError(successes, trails):
     p = successes * 1.0 / trails
     return math.sqrt((p * (1-p)) / (trails + 1))
 
+def findGames(filterFn, formatFns):
+    for season in ALL_SEASONS:
+        builds, players, chats, queues, actions = getDataFor(season)
+        for i in range(len(builds)):
+            entry = {'build': builds[i], 'player': players[i], 'chat': chats[i // 2],
+                     'queue': queues[i], 'action': actions[i], 'season': season, 'i': i}
+            if filterFn(entry):
+                displayValues = [str(formatFn(entry)) for formatFn in formatFns]
+                print('{},{}'.format(entry['player']['filename'], ','.join(displayValues)))
+    print('')
+
+def rankMapsBy(fn):
+    numerators = Counter()
+    denominators = Counter()
+    for season in ALL_SEASONS:
+        builds, players, chats, queues, actions = getDataFor(season)
+        for i in range(len(builds)):
+            entry = {'build': builds[i], 'player': players[i], 'chat': chats[i // 2],
+                     'queue': queues[i], 'action': actions[i], 'season': season, 'i': i}
+            mapTitle = entry['player']['mapTitle'].encode('utf-8') + str(season)
+            numerators[mapTitle] += 1 if fn(entry) else 0
+            denominators[mapTitle] += 1
+    percentages = []
+    for mapTitle in denominators.keys():
+        #if numerators[mapTitle] > 0:
+            percentages.append((numerators[mapTitle] * 100.0 / denominators[mapTitle], mapTitle))
+    for percent, mapTitle in reversed(sorted(percentages)):
+        print('{}: {}/{} games ({:.2f}%)'.format(mapTitle, numerators[mapTitle], denominators[mapTitle], percent))
+
 def getCounts(functions, valueFn = lambda x: '{:d}'.format(x), perEntry=False):
     columns = len(functions)
     for season in ALL_SEASONS:
@@ -229,8 +257,8 @@ PERCENT = lambda x: '{:.4f}'.format(100 * x)
 
 def perPlayerEvaluation(season, functions, denominatorIsFilter):
     builds, players, chats, queues, actions = getDataFor(season)
-    numerators = Counter()
-    denominators = Counter()
+    numerators = [0] * len(functions)
+    denominators = [0] * len(functions)
     for i in range(len(builds)):
         entry = {'build': builds[i], 'player': players[i], 'chat': chats[i // 2],
                  'queue': queues[i], 'action': actions[i], 'season': season, 'i': i}
@@ -297,8 +325,8 @@ def reduceToStats(mappingFn, filterFn, reductionFns, valueFn = lambda x: '{:.4f}
     print('')
 
 def allTimeStats(functions, valueFn = lambda x: '{:.4f}'.format(x), includeError = False, denominatorIsFilter = True):
-    numerators = Counter()
-    denominators = Counter()
+    numerators = [0] * len(functions)
+    denominators = [0] * len(functions)
     for season in ALL_SEASONS:
         builds, players, chats, queues, actions = getDataFor(season)
         for i in range(len(builds)):
@@ -363,11 +391,17 @@ def allMatches():
 def inSeason(season):
     return lambda entry: 1 if entry['season'] == season else 0
 
+def inSeasons(seasons):
+    return lambda entry: 1 if entry['season'] in seasons else 0
+
 def inDivision(division):
     return lambda entry: 1 if division in entry['player']['filename'] else 0
 
 def isFaction(faction):
     return lambda entry: 1 if entry['player']['faction'] == faction else 0
+
+def forPlayer(name):
+    return lambda entry: 1 if entry['player']['profileName'] == name else 0
 
 def isAllies():
     return lambda entry: 1 if getFactionType(entry['player']['faction']) == 'Allies' else 0
@@ -828,7 +862,7 @@ if False:
               winRate(both(negate(queueHas(3, 'v2')), isSoviets()))], PERCENT, includeError=True)
 
 # 027
-if True:
+if False:
     # Compare Radar Dome usage against artis/V2s.
     getStats([winRate(queueHas(3, 'ar')),
               winRate(queueHas(3, 'v2')),
@@ -840,3 +874,175 @@ if True:
     unitCountFns = [(countInQueue(3, 'ar'), allUnits(3)),
                     (countInQueue(3, 'v2'), allUnits(3))]
     throughQueueStats(unitCountFns, [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60], PERCENT)
+
+# 028
+if False:
+    # Mammoth, MAD tank and minelayer count.
+    getStats([(countInQueue(3, 'ma'), isSoviets()),
+              (countInQueue(3, '!t'), isSoviets()),
+              (countInQueue(3, 'ml'), allGames()),
+              (countInQueue(3, 'rj'), isAllies())])
+    # Find all games with MAD Tanks.
+    findGames(queueHas(3, '!t'), [lambda entry: entry['player']['profileName'], countInQueue(3, '!t')])
+    # Output some extra information about Booby vs Ohmk Torque.
+    findGames(both(queueHas(3, '!t'), inDivision('RECRUIT')), [lambda entry: entry['player']['profileName'], countInQueue(3, '!t'), countInQueue(2, 't'), countInQueue(4, 'mi')])
+    # Mammoth, MAD tank and minelayer usages (and corresponding Radar Dome usage).
+    getStats([(queueHas(3, 'ma'), isSoviets()),
+              (queueHas(3, '!t'), isSoviets()),
+              (queueHas(3, 'ml'), allGames()),
+              (queueHas(3, 'rj'), isAllies())], PERCENT)
+    # Mammoth, MAD tank and minelayer win rates.
+    getStats([winRate(isSoviets())], PERCENT)
+    getStats([winRate(queueHas(3, 'ma')),
+              winRate(queueHas(3, '!t')),
+              winRate(queueHas(3, 'ml')),
+              winRate(queueHas(3, 'rj')),
+              winRate(both(negate(queueHas(3, 'ma')), isSoviets())),
+              winRate(both(negate(queueHas(3, '!t')), isSoviets())),
+              winRate(both(negate(queueHas(3, 'ml')), allGames())),
+              winRate(both(negate(queueHas(3, 'rj')), isAllies()))], PERCENT)
+
+# 029
+if False:
+    # Average number of Mammoths queued when Soviet, when used and when built TC.
+    getStats([(countInQueue(3, 'ma'), isSoviets()),
+              (countInQueue(3, 'ma'), both(isSoviets(), built('TC'))),
+              (countInQueue(3, 'ma'), queueHas(3, 'ma'))])
+    # Win rates for Soviets, Soviet TC and Mammoth.
+    getStats([winRate(isSoviets()),
+              winRate(both(isSoviets(), built('TC'))),
+              winRate(queueHas(3, 'ma'))], PERCENT, includeError=True)
+    # Find out how many games had Mammoths.
+    getCounts([queueHas(3, 'ma')])
+    # Unit proportion through queue.
+    unitCountFns = [(countInQueue(3, 'ma'), allUnits(3)),
+                    (countInQueue(3, 'v2'), allUnits(3)),
+                    (countInQueue(3, 'ft'), allUnits(3)),
+                    (countInQueue(3, 'ap'), allUnits(3)),
+                    (countInQueue(3, 'ml'), allUnits(3))]
+    throughQueueStats(unitCountFns, [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60], PERCENT)
+
+# 030
+if False:
+    # Supply truck count.
+    getStats([(countInQueue(3, '$$'), allGames())])    
+    # Supply truck popularity.
+    getStats([(queueHas(3, '$$'), allGames())], PERCENT)
+    # Find out how many games had Supply Trucks.
+    getCounts([queueHas(3, '$$')])
+    # Find all games with Supply Trucks.
+    findGames(queueHas(3, '$$'), [lambda entry: entry['player']['filename'], countInQueue(3, '$$')])
+    # Supply truck win rate.
+    getStats([winRate(queueHas(3, '$$')),
+              winRate(both(negate(queueHas(3, '$$')), allGames()))], PERCENT, includeError=True)
+
+# 031
+if False:
+    # Faction vehicles average count.
+    # Nb. Phase Transport went from England to France in S06 (and MGG went the other way).
+    getStats([(countInQueue(3, 'mg'), either(both(inSeasons(range(1, 5+1)), isFaction('France')), both(inSeasons(range(6, 9+1)), isFaction('England')))),
+              (countInQueue(3, 'pt'), either(both(inSeasons(range(1, 5+1)), isFaction('England')), both(inSeasons(range(6, 9+1)), isFaction('France')))),
+              (countInQueue(3, 'ct'), isFaction('Germany')),
+              (countInQueue(3, 'tt'), isFaction('Russia')),
+              (countInQueue(3, 'dt'), isFaction('Ukraine'))])
+    # Counts of games with faction vehicles.
+    getCounts([queueHas(3, 'mg'), queueHas(3, 'pt'), queueHas(3, 'ct'), queueHas(3, 'tt'), queueHas(3, 'dt')])
+    # Faction vehicles usage rate.
+    getStats([(queueHas(3, 'mg'), either(both(inSeasons(range(1, 5+1)), isFaction('France')), both(inSeasons(range(6, 9+1)), isFaction('England')))),
+              (queueHas(3, 'pt'), either(both(inSeasons(range(1, 5+1)), isFaction('England')), both(inSeasons(range(6, 9+1)), isFaction('France')))),
+              (queueHas(3, 'ct'), isFaction('Germany')),
+              (queueHas(3, 'tt'), isFaction('Russia')),
+              (queueHas(3, 'dt'), isFaction('Ukraine'))], PERCENT)
+    # Win rates for faction vehicles.
+    getStats([winRate(queueHas(3, 'mg')),
+              winRate(queueHas(3, 'pt')),
+              winRate(queueHas(3, 'ct')),
+              winRate(queueHas(3, 'tt')),
+              winRate(queueHas(3, 'dt'))], PERCENT)
+
+# 032
+if False:
+    # Games containing MGGs.
+    findGames(queueHas(3, 'mg'), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8'), countInQueue(3, 'mg')])
+
+# 033
+if False:
+    # Air unit count.
+    getStats([(countInQueue(4, 'bh'), isAllies()),
+              (countInQueue(4, 'ch'), isAllies()),
+              (countInQueue(4, 'lb'), isAllies()),
+              (countInQueue(4, 'yk'), isSoviets()),
+              (countInQueue(4, 'mi'), isSoviets())])
+    # Air unit usage.
+    getStats([(queueHas(4, 'bh'), isAllies()),
+              (queueHas(4, 'ch'), isAllies()),
+              (queueHas(4, 'lb'), isAllies()),
+              (queueHas(4, 'yk'), isSoviets()),
+              (queueHas(4, 'mi'), isSoviets())], PERCENT)
+    # Air unit win rates.
+    getStats([winRate(queueHas(4, 'bh')),
+              winRate(queueHas(4, 'ch')),
+              winRate(queueHas(4, 'lb')),
+              winRate(queueHas(4, 'yk')),
+              winRate(queueHas(4, 'mi'))], PERCENT)
+
+# 034
+if False:
+    # Air unit count with all prerequisite buildings.
+    getStats([(countInQueue(4, 'bh'), built('HP')),
+              (countInQueue(4, 'ch'), built('HP')),
+              (countInQueue(4, 'lb'), both(built('HP'), built('TC'))),
+              (countInQueue(4, 'yk'), built('AF')),
+              (countInQueue(4, 'mi'), both(built('AF'), built('TC')))])
+    # Games containing Chinooks.
+    getCounts([queueHas(4, 'ch')])
+    # Win rates of tier three air units compared with Soviet/Allied Tech Centers.
+    getStats([winRate(queueHas(4, 'lb')),
+              winRate(queueHas(4, 'mi')),
+              winRate(allOf(negate(queueHas(4, 'lb')), built('TC'), isAllies())),
+              winRate(allOf(negate(queueHas(4, 'mi')), built('TC'), isSoviets())),
+              winRate(both(built('TC'), isAllies())),
+              winRate(both(built('TC'), isSoviets()))], PERCENT, includeError=True)
+
+# 035
+if False:
+    # Games containing chinooks.
+    findGames(queueHas(4, 'ch'), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8'), countInQueue(4, 'ch')])
+
+# 036
+if False:
+    # Naval unit count.
+    getStats([(countInQueue(5, 'sub'), isSoviets()),
+              (countInQueue(5, 'msb'), isSoviets()),
+              (countInQueue(5, 'gun'), isAllies()),
+              (countInQueue(5, 'des'), isAllies()),
+              (countInQueue(5, 'cru'), isAllies()),
+              (countInQueue(5, 'tra'), allGames())])
+    # Naval unit usage.
+    getStats([(queueHas(5, 'sub'), isSoviets()),
+              (queueHas(5, 'msb'), isSoviets()),
+              (queueHas(5, 'gun'), isAllies()),
+              (queueHas(5, 'des'), isAllies()),
+              (queueHas(5, 'cru'), isAllies()),
+              (queueHas(5, 'tra'), allGames())], PERCENT)
+    # Number of games with each unit.
+    getCounts([queueHas(5, 'sub'),
+               queueHas(5, 'msb'),
+               queueHas(5, 'gun'),
+               queueHas(5, 'des'),
+               queueHas(5, 'cru'),
+               queueHas(5, 'tra')])
+    # Naval unit win rates.
+    getStats([winRate(queueHas(5, 'sub')),
+              winRate(queueHas(5, 'msb')),
+              winRate(queueHas(5, 'gun')),
+              winRate(queueHas(5, 'des')),
+              winRate(queueHas(5, 'cru')),
+              winRate(queueHas(5, 'tra'))], PERCENT)
+    # Games containing Naval Yards and Sub Pens.
+    rankMapsBy(either(built('SP'), built('NY')))
+
+# 037
+if False:
+    # Games containing naval.
+    findGames(either(built('SP'), built('NY')), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8')])
