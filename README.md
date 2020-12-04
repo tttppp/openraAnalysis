@@ -3,7 +3,7 @@
 A script to extract data from [OpenRA](https://openra.net) replay files.  In particular this was written to analyse
 [RAGL](https://www.openra.net/news/ragl-announcement/) 1v1 matches and I've used this script to perform analysis of what
 units are built the most and how they affect win rates:
-* Comparison of Seasons 1-9: https://forum.openra.net/viewtopic.php?f=85&t=21224 (Also now included in the [docs](docs) directory in this repository
+* Comparison of Seasons 1-9: https://forum.openra.net/viewtopic.php?f=85&t=21224 (Also now included in the [docs](docs/index.md) directory in this repository
 * Season 9 Summary: https://forum.openra.net/viewtopic.php?p=311915#p311915
 
 This is intended to work with Python 2 and 3, but if there's an error with one then try the other.
