@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 from collections import Counter
@@ -18,7 +18,7 @@ DIVISION = sys.argv[2] if len(sys.argv) > 2 else None
 if DIVISION is not None:
     PREFIX += '{}-'.format(DIVISION)
 
-ALL_SEASONS = range(1,9+1)
+ALL_SEASONS = range(1,10+1)
 #ALL_SEASONS = ['RATL']
 
 itemNames = {'!': 'Tanya',
@@ -148,7 +148,7 @@ def getDataFor(season=None, division=None):
         del players[i]
         # Chats are per game, not per player.
         if i % 2 == 0:
-            del chats[i/2]
+            del chats[i//2]
         del queues[i]
         del actions[i]
     if len(players) == 0:
@@ -217,23 +217,35 @@ def findGames(filterFn, formatFns):
                 print('{},{}'.format(entry['player']['filename'], ','.join(displayValues)))
     print('')
 
-def rankMapsBy(fn):
-    numerators = Counter()
-    denominators = Counter()
+def findMatches(filterFn, formatFns):
     for season in ALL_SEASONS:
         builds, players, chats, queues, actions = getDataFor(season)
+        for i in range(len(builds) // 2):
+            entry = {'builds': builds[2*i:2*i+2], 'players': players[2*i:2*i+2], 'chat': chats[i],
+                     'queues': queues[2*i:2*i+2], 'actions': actions[2*i:2*i+2], 'season': season, 'i': i}
+            if filterFn(entry):
+                displayValues = [str(formatFn(entry)) for formatFn in formatFns]
+                print('{},{}'.format(entry['players'][0]['filename'], ','.join(displayValues)))
+    print('')
+
+def getFeatureCounts(featureFn, filterFn):
+    categories = set()
+    for season in ALL_SEASONS:
+        builds, players, chats, queues, actions = getDataFor(season)
+        counts = Counter()
         for i in range(len(builds)):
             entry = {'build': builds[i], 'player': players[i], 'chat': chats[i // 2],
                      'queue': queues[i], 'action': actions[i], 'season': season, 'i': i}
-            mapTitle = entry['player']['mapTitle'].encode('utf-8') + str(season)
-            numerators[mapTitle] += 1 if fn(entry) else 0
-            denominators[mapTitle] += 1
-    percentages = []
-    for mapTitle in denominators.keys():
-        #if numerators[mapTitle] > 0:
-            percentages.append((numerators[mapTitle] * 100.0 / denominators[mapTitle], mapTitle))
-    for percent, mapTitle in reversed(sorted(percentages)):
-        print('{}: {}/{} games ({:.2f}%)'.format(mapTitle, numerators[mapTitle], denominators[mapTitle], percent))
+            if filterFn(entry):
+                category = featureFn(entry)
+                categories.add(category)
+        values = []
+        for j in range(columns):
+            if perEntry:
+                counts[j] *= 1.0 / len(builds)
+            values.append(valueFn(counts[j]))
+        print('{},{}'.format(season, ','.join(values)))
+    print('')
 
 def getCounts(functions, valueFn = lambda x: '{:d}'.format(x), perEntry=False):
     columns = len(functions)
@@ -380,6 +392,21 @@ def either(fnA, fnB):
 def sumOf(fns):
     return lambda entry: sum(map(lambda fn: fn(entry), fns))
 
+def atLeast(fn, amount):
+    return lambda entry: fn(entry) >= amount
+
+def matchSum(fn):
+    return lambda entry: fn({'build': entry['builds'][0], 'player': entry['players'][0], 'chat': entry['chat'],
+                             'queue': entry['queues'][0], 'action': entry['actions'][0], 'season': entry['season'], 'i': entry['i']}) \
+                       + fn({'build': entry['builds'][1], 'player': entry['players'][1], 'chat': entry['chat'],
+                             'queue': entry['queues'][1], 'action': entry['actions'][1], 'season': entry['season'], 'i': entry['i']})
+
+def matchContains(fn):
+    return lambda entry: max(fn({'build': entry['builds'][0], 'player': entry['players'][0], 'chat': entry['chat'],
+                                 'queue': entry['queues'][0], 'action': entry['actions'][0], 'season': entry['season'], 'i': entry['i']}),
+                             fn({'build': entry['builds'][1], 'player': entry['players'][1], 'chat': entry['chat'],
+                                 'queue': entry['queues'][1], 'action': entry['actions'][1], 'season': entry['season'], 'i': entry['i']}))
+
 def allGames():
     """Count each match twice - once for each player."""
     return lambda entry: 1
@@ -417,6 +444,9 @@ def allUnits(q):
 
 def queueHas(q, item):
     return lambda entry: 1 if item in entry['queue'][q] else 0
+
+def firstQueuedIndex(q, item):
+    return lambda entry: entry['queue'][q].index(item) if item in entry['queue'][q] else 0
 
 def built(item):
     return lambda entry: 1 if '[{}]'.format(item) in entry['build'] or '[{}]'.format(item) in entry['queue'][1] else 0
@@ -494,6 +524,26 @@ def toColour(value, limits={0: (0, 0, 0), 50: (0, 0, 255), 100: (230, 230, 255)}
     upper = above[0]
     rgb = (linearInt(lower, value, upper, limits[lower][i], limits[upper][i]) for i in range(3))
     return colourToInt(rgb)
+
+def rankMapsBy(numeratorFn, filterFn=allGames(), restrictToMap=True, suppressEmpty=False):
+    for season in ALL_SEASONS:
+        numerators = Counter()
+        denominators = Counter()
+        builds, players, chats, queues, actions = getDataFor(season)
+        for i in range(len(builds) // 2):
+            entry = {'builds': builds[2*i:2*i+2], 'players': players[2*i:2*i+2], 'chat': chats[i],
+                     'queues': queues[2*i:2*i+2], 'actions': actions[2*i:2*i+2], 'season': season, 'i': i}
+            mapTitle = str(season) + '; ' + entry['players'][0]['mapTitle'].encode('utf-8')
+            if filterFn(entry) > 0:
+                numerators[mapTitle] += numeratorFn(entry)
+                denominators[mapTitle if restrictToMap else 'All'] += 1
+        percentages = []
+        for mapTitle in numerators.keys():
+            if numerators[mapTitle] > 0 or not suppressEmpty:
+                percentages.append((numerators[mapTitle] * 100.0 / denominators[mapTitle if restrictToMap else 'All'], mapTitle))
+        for percent, mapTitle in reversed(sorted(percentages)):
+            print('{}: {}/{} games ({:.2f}%)'.format(mapTitle, numerators[mapTitle], denominators[mapTitle if restrictToMap else 'All'], percent))
+    print('')
 
 print('Total games analysed: {}'.format(len(all_players)))
 
@@ -1039,10 +1089,66 @@ if False:
               winRate(queueHas(5, 'des')),
               winRate(queueHas(5, 'cru')),
               winRate(queueHas(5, 'tra'))], PERCENT)
-    # Games containing Naval Yards and Sub Pens.
-    rankMapsBy(either(built('SP'), built('NY')))
+    # Matches containing Naval Yards or Sub Pens.
+    rankMapsBy(matchContains(either(built('SP'), built('NY'))), suppressEmpty=True)
 
 # 037
 if False:
     # Games containing naval.
     findGames(either(built('SP'), built('NY')), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8')])
+
+# 038
+if False:
+    # Demo trucks
+    findGames(atLeast(countInQueue(3, 'dt'), 5), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8'), countInQueue(3, 'dt')])
+
+# 040
+if False:
+    # First time Tech building built by season.
+    getStats([(firstQueuedIndex(0, 'SD'), queueHas(0, 'SD')),
+              (firstQueuedIndex(0, 'RD'), queueHas(0, 'RD')),
+              (firstQueuedIndex(0, 'TC'), queueHas(0, 'TC'))])
+    # Win rate of tech buildings by season.
+    for building in ['SD', 'RD', 'TC']:
+        #getStats(bucketedWinRate(firstQueuedIndex(0, building), [0, 10, 20, 30, 40, 50, float('inf')]), PERCENT)
+        fn = firstQueuedIndex(0, building)
+        getStats(bucketWithFilter(wonWhen(fn), resultWhen(fn), [0, 10, 20, 30, 40, 50, float('inf')]), PERCENT)
+
+# 041
+if True:
+    rankMapsBy(allGames(), restrictToMap=False)
+    #rankMapsBy(matchContains(built('TC')), allGames())
+    #rankMapsBy(matchContains(wonWhen(isAllies())), matchContains(resultWhen(isAllies())))
+    #rankMapsBy(matchContains(wonWhen(isSoviets())), matchContains(resultWhen(isSoviets())))
+
+if False:
+    #findGames(atLeast(countPower('NukePowerInfoOrder'), 5), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8'), countPower('NukePowerInfoOrder')])
+    # Faction pick
+    getStats([(isAllies(), allGames()), (isSoviets(), allGames())], PERCENT)
+    findGames(both(queueHas(3, 'ma'), inDivision('PLAY')), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8')])
+
+if False:
+    #findGames(allOf(atLeast(countPower('NukePowerInfoOrder'), 4)), [lambda entry: (entry['player']['profileName'] + ',' + entry['player']['mapTitle']).encode('utf-8') + ',{}'.format(countPower('NukePowerInfoOrder')(entry))])
+    findMatches(atLeast(matchSum(countPower('NukePowerInfoOrder')), 4), [lambda entry: (entry['players'][0]['mapTitle']).encode('utf-8') + ',{}'.format(matchSum(countPower('NukePowerInfoOrder'))(entry))])
+    #findGames(both(hasDuration(), atLeast(duration(), 80)), [lambda entry: (entry['player']['mapTitle']).encode('utf-8') + ',{}'.format(duration()(entry))])
+    findGames(atLeast(countBuilt('TC'), 4), [lambda entry: (entry['player']['mapTitle']).encode('utf-8') + ',{}'.format(countBuilt('TC')(entry))])
+    findMatches(atLeast(matchSum(countBuilt('TC')), 7), [lambda entry: (entry['players'][0]['mapTitle']).encode('utf-8') + ',{}'.format(matchSum(countBuilt('TC'))(entry))])
+    findGames(atLeast(countBuilt('CP'), 40), [lambda entry: (entry['player']['mapTitle']).encode('utf-8') + ',{}'.format(countBuilt('CP')(entry))])
+    findGames(atLeast(countBuilt('MS'), 3), [lambda entry: (entry['player']['mapTitle']).encode('utf-8') + ',{}'.format(countBuilt('MS')(entry))])
+    findMatches(atLeast(matchSum(countBuilt('MS')), 5), [lambda entry: (entry['players'][0]['mapTitle']).encode('utf-8') + ',{}'.format(matchSum(countBuilt('MS'))(entry))])
+    findMatches(atLeast(matchSum(countPower('UkraineParabombs')), 6), [lambda entry: (entry['players'][0]['mapTitle']).encode('utf-8') + ',{}'.format(matchSum(countPower('UkraineParabombs'))(entry))])
+
+if False:
+    #findGames(both(queueHas(4, 'ch'), inSeason(4)), [lambda entry: entry['player']['mapTitle'] + ',{}'.format(countInQueue(4, 'ch')(entry))])
+    #getStats([(queueHas(2, '*'), isAllies()), (queueHas(2, 't'), isSoviets())], PERCENT)
+    findGames(allOf(queueHas(2, '*'), inDivision('MASTER'), inSeason(10)), [lambda entry: entry['player']['name'] + ',' + entry['player']['mapTitle'] + ',{}'.format(countInQueue(2, '*')(entry))])
+
+
+# RAGL Stats
+if False:
+    _, players, _, _, _ = getDataFor(9)
+    # Win rates for Allies/Soviets.
+    for name in set([player['profileName'] for player in players]):
+        print(name)
+        allTimeStats([winRate(both(isAllies(), forPlayer(name))),
+                      winRate(both(isSoviets(), forPlayer(name)))], PERCENT)

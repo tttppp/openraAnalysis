@@ -9,13 +9,14 @@ import requests
 import json
 import datetime, time
 
-RAGL = True
+RAGL = False
 
 if not RAGL:
     # E.g. For a one-day tournament.
-    PREFIX = 'OpenRA-2020-09-05'
-    MOD = 'cnc'
-    RELEASE = 'release-20200503'
+    SEASON = 0
+    PREFIX = 'ra-Server'
+    MOD = 'ra'
+    RELEASES = ['playtest-20201213', 'playtest-20210131', 'release-20210321']
 else:
     # Which RAGL season to analyse replays for.
     SEASON = int(sys.argv[1])#9
@@ -23,19 +24,21 @@ else:
     PREFIX = 'RAGL-S{:02d}-'.format(SEASON)
     MOD = 'ra'
     if SEASON == 1:
-        RELEASE = 'release-20151224'
+        RELEASES = ['release-20151224']
     elif SEASON in [2, 3]:
-        RELEASE = 'release-20161019'
+        RELEASES = ['release-20161019']
     elif SEASON == 4:
-        RELEASE = 'release-20170527'
+        RELEASES = ['release-20170527']
     elif SEASON == 5:
-        RELEASE = 'release-20180307'
+        RELEASES = ['release-20180307']
     elif SEASON == 6:
-        RELEASE = 'release-20180923'
+        RELEASES = ['release-20180923']
     elif SEASON in [7, 8]:
-        RELEASE = 'release-20190314'
+        RELEASES = ['release-20190314']
     elif SEASON == 9:
-        RELEASE = 'release-20200503'
+        RELEASES = ['release-20200503']
+    elif SEASON == 10:
+        RELEASES = ['playtest-20201213', 'playtest-20210131', 'release-20210321']
     else:
         print('Unknown RAGL season', SEASON)
         raise Exception
@@ -63,18 +66,8 @@ DUMP_DATA = True
 #     GNU/Linux:    /home/<username>/.openra/
 OPENRA_SUPPORT_DIRECTORY = '{}/.openra'.format(os.path.expanduser('~'))
 
-# Load the replays from the corresponding location for the RAGL season.
-path = '{}/Replays/{}/{}/'.format(OPENRA_SUPPORT_DIRECTORY, MOD, RELEASE)
-
 # A local file to store the responses from the OpenRA forum fingerprint endpoint.
 FINGERPRINT_CACHE_FILE = 'fingerprint.cache'
-
-# Find all filenames for replays matching the restrictions.
-filenames = []
-for root, dirs, files in os.walk(path):
-    for filename in files:
-        if filename.startswith(PREFIX):
-            filenames.append(filename)
 
 # Mapping from official (variable length) title, to unified output format.
 # A couple of examples:
@@ -290,390 +283,445 @@ players = []
 chats = []
 actions = []
 fingerPrintToProfile = loadCachedFingerprints()
-# Process each replay in turn.
-for filename in filenames:
-    # Store the binary data in a variable called x.
-    f = open(path + filename, 'rb')
-    x = f.read()
-    f.close()
+for RELEASE in RELEASES:
+    releaseDate = RELEASE.split('-')[1]
+    # Load the replays from the corresponding location for the RAGL season.
+    path = '{}/Replays/{}/{}/'.format(OPENRA_SUPPORT_DIRECTORY, MOD, RELEASE)
     
-    def getInt(x, pos):
-        """Combine the four bytes starting at pos as a little endian integer."""
-        total = 0;
-        for i in range(4):
-            total += x[pos + i] * (256 ** i)
-        return total
+    # Find all filenames for replays matching the restrictions.
+    filenames = []
+    for root, dirs, files in os.walk(path):
+        for filename in files:
+            if filename.startswith(PREFIX):
+                filenames.append(filename)
     
-    def getClientId(x, pos):
-        """Get the client id that gave the command."""
-        return getInt(x, pos)
-    
-    def getPlayer(x, pos):
-        """Get the id of the player that gave the command."""
-        if RELEASE >= 'release-20200503':
-            return x[pos+1]
-        return x[pos]
-    
-    def outputEvent(item):
-        """Look up an item in the itemMap.
+    # Process each replay in turn.
+    for filename in filenames:
+        # Store the binary data in a variable called x.
+        f = open(path + filename, 'rb')
+        x = f.read()
+        f.close()
         
-        Output the unified item code along with the index of the queue it came from.
-        For example if the input is 'powr' then the output is 0, 'PP'."""
-        for q, items in enumerate(itemMap):
-            if item in items.keys():
-                return q, items[item][0]
-        print('UNKNOWN:', item.decode('utf-8'), 'in', filename)
-        raise Exception
-    
-    def getStartProductionEvents(x, pos):
-        """Get information about a StartProduction event. Return the player id, the queue index and the item(s)."""
-        l = bytesToInt(x[pos + 5])
-        player = getPlayer(x, pos)
-        item = x[pos + 6: pos + 6 + l]
-        count = bytesToInt(x[pos + 6 + l])
-        q, item = outputEvent(item)
-        return player, q, [item] * count
-    
-    def getPlaceBuildingEvents(x, pos):
-        """Get information about a PlaceBuilding event. Return the player id, the queue index and the item."""
-        player = getPlayer(x, pos)
-        # Different OpenRA releases have slightly different offsets.
-        offset = (17 if RELEASE <= 'release-20170527' else (19 if RELEASE <= 'release-20180923' else 11))
-        l = bytesToInt(x[pos + offset])
-        item = x[pos + offset + 1: pos + offset + 1 + l]
-        q, item = outputEvent(item)
-        return player, q, ['[' + item + ']']
-    
-    def getCancelProductionEvent(x, pos):
-        """Get information about a CancelProduction event. Return the player id, the queue index and the item(s)."""
-        l = bytesToInt(x[pos + 5])
-        player = getPlayer(x, pos)
-        item = x[pos + 6: pos + 6 + l]
-        count = bytesToInt(x[pos + 6 + l])
-        q, item = outputEvent(item)
-        return player, q, [item] * count
-
-    def getPauseProductionEvent(x, pos):
-        """Get information about a PauseProduction event. Return the player id, the queue index and the item(s)."""
-        l = bytesToInt(x[pos + 5])
-        player = getPlayer(x, pos)
-        item = x[pos + 6: pos + 6 + l]
-        q, item = outputEvent(item)
-        return player, q, [item]
-
-    def getSupportPowerEvent(x, pos):
-        player = getPlayer(x, pos)
-        return player, None, None
-
-    def getPauseGameEvent(x, pos):
-        if RELEASE >= 'release-20200503':
-            # This isn't right - it always comes back as 4.
-            player = getPlayer(x, pos - 1)
-        else:
-            # Skip four bytes of 0xff
-            pos += 4
-            # This isn't right - it always comes back as 4.
-            player = getPlayer(x, pos)
-        l = bytesToInt(x[pos + 1])
-        action = x[pos + 2: pos + 2 + l].decode('utf-8')
-        return player, None, [action]
-
-    def getChat(x, pos):
-        if RELEASE < 'release-20200503':
-            l = bytesToInt(x[pos])
-            message = x[pos + 1: pos + 1 + l].decode('utf-8')
-            globalChannel = (x[pos-8:pos] != b'TeamChat')
-            clientIndex = getClientId(x, pos - (18 if globalChannel else 22))
-        else:
-            # Messages in the global channel have channel == 4.
-            channel = x[pos]
-            globalChannel = (channel == 4)
-            l = bytesToInt(x[pos + 1])
-            message = x[pos + 2: pos + 2 + l].decode('utf-8')
-            clientOffset = (0 if globalChannel else 4)
-            clientIndex = getClientId(x, pos + 2 + l + clientOffset)
-        return {'globalChannel': globalChannel, 'message': message, 'clientIndex': clientIndex}
-
-    def getPos(x, term, start):
-        """Search for a binary string and return the position just after it.
+        def getInt(x, pos):
+            """Combine the four bytes starting at pos as a little endian integer."""
+            total = 0;
+            for i in range(4):
+                total += x[pos + i] * (256 ** i)
+            return total
         
-        x: The binary content to search through.
-        term: The binary string to search for.
-        start: The position to start the search from.
-        Returns: The position just after the search term finishes, or the length of the content if the term is not found."""
-        # This is needed in Python 3 to ensure we are searching for bytes in a bytes object.
-        if isinstance(term, str):
-            term = term.encode('utf-8')
-        try:
-            return x[start:].index(term) + len(term) + start
-        except ValueError:
-            # No more terms found.
-            return len(x)
-
-    def getPlaceBuildingPos(x, placeBuildingTerm, start):
-        """Search for the a "place building" event and return the position just after it.
+        def getClientId(x, pos):
+            """Get the client id that gave the command."""
+            return getInt(x, pos)
         
-        x: The binary string to search through.
-        placeBuildingTerm: The term to search for.
-        start: The position to start the search from.
-        Returns: The position just after the "place building" term, or the length of the content if none was found.
-        Note that this tries to ignore invalid place building events by looking for other matching "place building" events soon after."""
-        placeBuildingPos = getPos(x, placeBuildingTerm, start)
-        if placeBuildingPos < len(x):
-            player, q, eventList = getPlaceBuildingEvents(x, placeBuildingPos)
-            # If player fails to place building then there will likely be another very soon after
-            # (using trial and error this seems to be less than 1000 bytes after).
-            nextPlaceBuildingPos = getPos(x, placeBuildingTerm, placeBuildingPos)
-            while nextPlaceBuildingPos < len(x) and nextPlaceBuildingPos < placeBuildingPos + 1000:
-                nextEventPlayer, nextEventQ, nextEventList = getPlaceBuildingEvents(x, nextPlaceBuildingPos)
-                if nextEventPlayer == player and nextEventQ == q and eventList == nextEventList:
-                    placeBuildingPos = nextPlaceBuildingPos
-                nextPlaceBuildingPos = getPos(x, placeBuildingTerm, nextPlaceBuildingPos)
-        return placeBuildingPos
-
-    def removeLastStartProductionEvent(events, player, q, item):
-        """Try to remove a specified "StartProduction" event from the player's queue."""
-        try:
-            # Remove the last StartProduction event from the event list.
-            latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
-            events[player][q].pop(latestStartProductionIndex)
-        except ValueError:
-            # Cancelled something that wasn't being produced.
-            pass
-
-    def getField(x, field, start):
-        """Search for the value of a field (e.g. 'Color: F5F872').
+        def getPlayer(x, pos):
+            """Get the id of the player that gave the command."""
+            if releaseDate == '20200503':
+                return x[pos+1]
+            return x[pos]
         
-        x: The binary content to search through.
-        field: The field name to search for (e.g. 'Color').
-        start: The position to start the search from.
-        Returns: The corresponding value (e.g. 'F5F872')."""
-        fieldStart = getPos(x, field + b':', start)
-        fieldEnd = getPos(x, b'\n', fieldStart)
-        # Some replay files seem to have some corrupted characters at the end.
-        while fieldEnd - 1 > fieldStart + 1:
-            try:
-                value = x[fieldStart+1:fieldEnd-1].decode('utf-8')
-                return value
-            except ValueError:
-                fieldEnd -= 1
-        # If we couldn't find a sensible value for the field then return an empty string.
-        return ''
-
-    def getDateFieldAsTimestamp(x, field, start):
-        value = getField(x, field, start)
-        try:
-            # This is compatible with Python 2 and 3.
-            return time.mktime(datetime.datetime.strptime(value[:19], '%Y-%m-%d %H-%M-%S').timetuple())
-        except ValueError:
-            # Undefined outcomes have dates that are intentionally set to an invalid year (0000).
-            return None
-
-    # Build information comes after the "StartGame" command.
-    startGame = x.index(b'StartGame')
-    
-    # Get end game information.
-    rootPos = getPos(x, b'Root:', 0)
-    if rootPos >= len(x):
-        print('Unable to find end game information in {} - replay corrupted?'.format(filename))
-        continue
-    try:
-        finalGameTick = int(getField(x, b'FinalGameTick', rootPos))
-    except:
-        # Earlier releases did not include this field.
-        finalGameTick = None
-    mapTitle = getField(x, b'MapTitle', rootPos)
-    version = getField(x, b'Version', rootPos)
-    startTime = getDateFieldAsTimestamp(x, b'StartTimeUtc', rootPos)
-    endTime = getDateFieldAsTimestamp(x, b'EndTimeUtc', rootPos)
-    
-    factionPicks = set()
-    # Try to get player information.
-    for playerId in [0, 1]:
-        pos = -1
-        while True:
-            pos = getPos(x, b'Player@%d:'%playerId, pos + 1)
-            if pos >= len(x):
-                break
-            playerPos = pos
-        name = getField(x, b'Name', playerPos)
-        outcome = getField(x, b'Outcome', playerPos)
-        clientIndex = int(getField(x, b'ClientIndex', playerPos))
-        faction = getField(x, b'FactionName', playerPos)
-        fingerprint = getField(x, b'Fingerprint', playerPos)
-        try:
-            outcomeTime = getDateFieldAsTimestamp(x, b'OutcomeTimestampUtc', playerPos)
-        except ValueError:
-            # If no one was eliminated.
-            outcomeTime = None
-            raise
-        if fingerprint != '':
-            if fingerprint not in fingerPrintToProfile:
-                response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
-                profileID = 'Unknown'
-                profileName = name
-                for line in response.text.split('\n'):
-                    line = line.strip()
-                    if line.startswith('ProfileID: '):
-                        profileID = line[len('ProfileID: '):]
-                    elif line.startswith('ProfileName: '):
-                        profileName = line[len('ProfileName: '):]
-                fingerPrintToProfile[fingerprint] = {'profileID': profileID, 'profileName': profileName}
-                with open(FINGERPRINT_CACHE_FILE, 'a') as fingerprintCache:
-                    fingerprintCache.write('{}\t{}\t{}\n'.format(fingerprint, profileID, profileName))
-
-        pos = -1
-        while True:
-            pos = getPos(x, b'Client@%d:'%clientIndex, pos + 1)
-            if pos >= len(x):
-                break
-            clientPos = pos
-        factionPick = getField(x, b'Faction', clientPos)
-        
-        factionPicks.add(factionPick)
-        
-        players.append({'fingerprint': fingerprint,
-                        'name': name,
-                        'profileID': 'Unknown' if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileID'],
-                        'profileName': name if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileName'],
-                        'clientIndex': clientIndex,
-                        'filename': filename,
-                        'abbreviations': getAbbreviationsFromFilename(filename),
-                        'faction': faction,
-                        'factionPick': factionPick,
-                        'outcome': outcome,
-                        'finalGameTick': finalGameTick,
-                        'startTime': startTime,
-                        'outcomeTime': outcomeTime,
-                        'endTime': endTime,
-                        'mapTitle': mapTitle,
-                        'version': version})
-    if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
-        # Remove both players and skip processing the file.
-        players = players[:-2]
-        continue
-    
-    # Store the client id to player id mapping.
-    clientToPlayerMap = {}
-    for player in players:
-        clientToPlayerMap[player['clientIndex']] = player
-    
-    # Load any chat messages.
-    pos = 0
-    chat = []
-    while pos < len(x):
-        pos = getPos(x, b'Chat', pos)
-        if pos < len(x):
-            try:
-                chat.append(getChat(x, pos))
-            except UnicodeDecodeError:
-                # Silently ignore chat message if it can't be decoded.
-                pass
-    chats.append(chat)
-    
-    events = defaultdict(lambda : defaultdict(list))
-    actionMap = {b'StartProduction': (getPos, getStartProductionEvents),
-                 b'PlaceBuilding': (getPlaceBuildingPos, getPlaceBuildingEvents),
-                 b'LineBuild': (getPos, getPlaceBuildingEvents),
-                 b'CancelProduction': (getPos, getCancelProductionEvent),
-                 b'PauseProduction': (getPos, getPauseProductionEvent),
-                 b'SovietSpyPlane': (getPos, getSupportPowerEvent),
-                 b'SovietParatroopers': (getPos, getSupportPowerEvent),
-                 b'UkraineParabombs': (getPos, getSupportPowerEvent),
-                 b'Chronoshift': (getPos, getSupportPowerEvent),
-                 # Iron Curtain comes from two different events (depending on OpenRA release).
-                 b'GrantExternalConditionPowerInfoOrder': (getPos, getSupportPowerEvent),
-                 b'GrantUpgradePowerInfoOrder': (getPos, getSupportPowerEvent),
-                 b'NukePowerInfoOrder': (getPos, getSupportPowerEvent),
-                 # Sonar Pulse
-                 b'SpawnActorPowerInfoOrder': (getPos, getSupportPowerEvent),
-                 b'PauseGame': (getPos, getPauseGameEvent)}
-    pos = startGame
-    build = defaultdict(list)
-    actionList = defaultdict(list)
-    posMap = {}
-    try:
-        while True:
-            # Find the next action of each type in the file.
-            for term, functions in actionMap.items():
-                if term not in posMap:
-                    getPosFn = functions[0]
-                    posMap[term] = getPosFn(x, term, pos)
-            minPos = min(posMap.values())
-            # Break if we're at the end of the file.
-            if minPos == len(x):
-                break
-            # Execute the functions corresponding to the type of event.
-            for term, functions in actionMap.items():
-                if posMap[term] == minPos:
-                    # Reset this entry in posMap so that we look for the next matching term next iteration.
-                    del posMap[term]
-                    getEventFn = functions[1]
-                    player, q, eventList = getEventFn(x, minPos)
-                    if term in [b'StartProduction', b'PlaceBuilding', b'LineBuild']:
-                        events[player][q] += eventList
-                        if term == b'PlaceBuilding' and q == 0:
-                            for item in eventList:
-                                build[player].append(item)
-                    elif term == b'PauseProduction':
-                        # Remove item from queue, it will be re-added by another StartProduction event.
-                        removeLastStartProductionEvent(events, player, q, item)
-                    elif term == b'CancelProduction':
-                        # If the previous cancelled amount of this unit was not 1 or 5 then it must have been all of the items.
-                        maxCancelled = 0
-                        itemCancelled = eventList[0]
-                        numberCancelled = len(eventList)
-                        for actionTerm, actionQ, actionEventList in actionList[player]:
-                            if actionTerm == 'StartProduction' and actionQ == q and actionEventList[0] == itemCancelled:
-                                maxCancelled += len(actionEventList)
-                            elif actionTerm == 'CancelProduction' and actionQ == q and actionEventList[0] == itemCancelled:
-                                # If the previous cancelled amount of this unit was 1 or 5 then assume only some were cancelled.
-                                if len(actionEventList) == 1 or len(actionEventList) == 5:
-                                    maxCancelled = max(0, maxCancelled - len(actionEventList))
-                                else:
-                                    # Otherwise the whole queue was cancelled, so no more can be cancelled in future.
-                                    maxCancelled = 0
-                        for item in eventList[:maxCancelled]:
-                            # For buildings then we can only cancel production if it was not placed.
-                            unplaced = 0
-                            for event in events[player][q]:
-                                if event == item:
-                                    unplaced += 1
-                                elif event == '[{}]'.format(item):
-                                    unplaced -= 1
-                            if unplaced > 0:
-                                removeLastStartProductionEvent(events, player, q, item)
-                    actionList[player].append((term.decode('utf-8'), q, eventList))
-            pos = minPos
-
-        if len(events) != 2:
-            # Probably one of the players gave no orders.
-            print('Found game with {} player(s): {}'.format(len(events), filename))
-            players = players[:-2]
-            chats = chats[:-1]
+        def outputEvent(item):
+            """Look up an item in the itemMap.
+            
+            Output the unified item code along with the index of the queue it came from.
+            For example if the input is 'powr' then the output is 0, 'PP'."""
+            for q, items in enumerate(itemMap):
+                if item in items.keys():
+                    return q, items[item][0]
+            print('UNKNOWN:', item.decode('utf-8'), 'in', filename)
             raise Exception
         
-        for player in sorted(events.keys()):
-            eventList = events[player]
-            for q, queue in eventList.items():
-                # Can be used to find which game contains an unusual item.
-                if ITEM_TO_FIND in queue:
-                    print('{} found in {} ({}) Count: {}'.format(ITEM_TO_FIND, filename, mapTitle, queue.count(ITEM_TO_FIND)))
-                #print(player, q, ','.join(queue))
-                unitList[q] += queue
-            #if ''.join(build[player]).startswith('[PP][PP][PP]'):
-            #    print(filename, mapTitle)
-            builds.append(build[player])
-            buildsByMap[mapTitle].append(build[player])
-            # Convert defaultdict to list.
-            queues.append(list(map(lambda q: eventList[q], range(len(itemMap)))))
-            actions.append(actionList[player])
-    except ZeroDivisionError:
-        # Used for debugging.
-        sys.tracebacklimit = 0
-        raise Exception
-    except:
-        print('Skipping ' + filename)
+        def getStartProductionEvents(x, pos):
+            """Get information about a StartProduction event. Return the player id, the queue index and the item(s)."""
+            # Different OpenRA releases have slightly different offsets.
+            if releaseDate <= '20200503':
+                offset = 5
+                playerOffset = 0
+            else:
+                offset = 6
+                playerOffset = 2
+            l = bytesToInt(x[pos + offset])
+            player = getPlayer(x, pos + playerOffset)
+            item = x[pos + offset + 1: pos + offset + 1 + l]
+            count = bytesToInt(x[pos + offset + 1 + l])
+            q, item = outputEvent(item)
+            return player, q, [item] * count
+        
+        def getPlaceBuildingEvents(x, pos):
+            """Get information about a PlaceBuilding event. Return the player id, the queue index and the item."""
+            # Different OpenRA releases have slightly different offsets.
+            if releaseDate <= '20200503':
+                offset = (17 if RELEASE <= 'release-20170527' else (19 if RELEASE <= 'release-20180923' else 11))
+                playerOffset = 0
+            else:
+                offset = 12
+                playerOffset = 2
+            player = getPlayer(x, pos + playerOffset)
+            l = bytesToInt(x[pos + offset])
+            item = x[pos + offset + 1: pos + offset + 1 + l]
+            q, item = outputEvent(item)
+            return player, q, ['[' + item + ']']
+        
+        def getCancelProductionEvent(x, pos):
+            """Get information about a CancelProduction event. Return the player id, the queue index and the item(s)."""
+            # Different OpenRA releases have slightly different offsets.
+            if releaseDate <= '20200503':
+                offset = 5
+                playerOffset = 0
+            else:
+                offset = 6
+                playerOffset = 2
+            l = bytesToInt(x[pos + offset])
+            player = getPlayer(x, pos + playerOffset)
+            item = x[pos + offset + 1: pos + offset + 1 + l]
+            count = bytesToInt(x[pos + offset + 1 + l])
+            q, item = outputEvent(item)
+            return player, q, [item] * count
+    
+        def getPauseProductionEvent(x, pos):
+            """Get information about a PauseProduction event. Return the player id, the queue index and the item(s)."""
+            if releaseDate <= '20200503':
+                offset = 5
+                playerOffset = 0
+            else:
+                offset = 6
+                playerOffset = 2
+            l = bytesToInt(x[pos + offset])
+            player = getPlayer(x, pos + playerOffset)
+            item = x[pos + offset + 1: pos + offset + 1 + l]
+            q, item = outputEvent(item)
+            return player, q, [item]
+    
+        def getSupportPowerEvent(x, pos):
+            playerOffset = 0
+            if releaseDate > '20200503':
+                playerOffset = 2
+            player = getPlayer(x, pos + playerOffset)
+            return player, None, None
+    
+        def getPauseGameEvent(x, pos):
+            if releaseDate >= '20200503':
+                # This isn't right - it always comes back as 4.
+                player = getPlayer(x, pos - 1)
+            else:
+                # Skip four bytes of 0xff
+                pos += 4
+                # This isn't right - it always comes back as 4.
+                player = getPlayer(x, pos)
+            l = bytesToInt(x[pos + 1])
+            action = x[pos + 2: pos + 2 + l].decode('utf-8')
+            return player, None, [action]
+    
+        def getChat(x, pos):
+            if releaseDate > '20200503':
+                # Messages in the global channel have channel == 4.
+                channel = x[pos]
+                globalChannel = (channel == 4)
+                l = bytesToInt(x[pos + 2])
+                message = x[pos + 3: pos + 3 + l].decode('utf-8')
+                clientOffset = (0 if globalChannel else 4)
+                clientIndex = getClientId(x, pos + 3 + l + clientOffset)
+            elif releaseDate < '20200503':
+                l = bytesToInt(x[pos])
+                message = x[pos + 1: pos + 1 + l].decode('utf-8')
+                globalChannel = (x[pos-8:pos] != b'TeamChat')
+                clientIndex = getClientId(x, pos - (18 if globalChannel else 22))
+            else:
+                # Messages in the global channel have channel == 4.
+                channel = x[pos]
+                globalChannel = (channel == 4)
+                l = bytesToInt(x[pos + 1])
+                message = x[pos + 2: pos + 2 + l].decode('utf-8')
+                clientOffset = (0 if globalChannel else 4)
+                clientIndex = getClientId(x, pos + 2 + l + clientOffset)
+            return {'globalChannel': globalChannel, 'message': message, 'clientIndex': clientIndex}
+    
+        def getPos(x, term, start):
+            """Search for a binary string and return the position just after it.
+            
+            x: The binary content to search through.
+            term: The binary string to search for.
+            start: The position to start the search from.
+            Returns: The position just after the search term finishes, or the length of the content if the term is not found."""
+            # This is needed in Python 3 to ensure we are searching for bytes in a bytes object.
+            if isinstance(term, str):
+                term = term.encode('utf-8')
+            try:
+                return x[start:].index(term) + len(term) + start
+            except ValueError:
+                # No more terms found.
+                return len(x)
+    
+        def getPlaceBuildingPos(x, placeBuildingTerm, start):
+            """Search for the a "place building" event and return the position just after it.
+            
+            x: The binary string to search through.
+            placeBuildingTerm: The term to search for.
+            start: The position to start the search from.
+            Returns: The position just after the "place building" term, or the length of the content if none was found.
+            Note that this tries to ignore invalid place building events by looking for other matching "place building" events soon after."""
+            placeBuildingPos = getPos(x, placeBuildingTerm, start)
+            if placeBuildingPos < len(x):
+                player, q, eventList = getPlaceBuildingEvents(x, placeBuildingPos)
+                # If player fails to place building then there will likely be another very soon after
+                # (using trial and error this seems to be less than 1000 bytes after).
+                nextPlaceBuildingPos = getPos(x, placeBuildingTerm, placeBuildingPos)
+                while nextPlaceBuildingPos < len(x) and nextPlaceBuildingPos < placeBuildingPos + 1000:
+                    nextEventPlayer, nextEventQ, nextEventList = getPlaceBuildingEvents(x, nextPlaceBuildingPos)
+                    if nextEventPlayer == player and nextEventQ == q and eventList == nextEventList:
+                        placeBuildingPos = nextPlaceBuildingPos
+                    nextPlaceBuildingPos = getPos(x, placeBuildingTerm, nextPlaceBuildingPos)
+            return placeBuildingPos
+    
+        def removeLastStartProductionEvent(events, player, q, item):
+            """Try to remove a specified "StartProduction" event from the player's queue."""
+            try:
+                # Remove the last StartProduction event from the event list.
+                latestStartProductionIndex = len(events[player][q]) - list(reversed(events[player][q])).index(item) - 1
+                events[player][q].pop(latestStartProductionIndex)
+            except ValueError:
+                # Cancelled something that wasn't being produced.
+                pass
+    
+        def getField(x, field, start):
+            """Search for the value of a field (e.g. 'Color: F5F872').
+            
+            x: The binary content to search through.
+            field: The field name to search for (e.g. 'Color').
+            start: The position to start the search from.
+            Returns: The corresponding value (e.g. 'F5F872')."""
+            fieldStart = getPos(x, field + b':', start)
+            fieldEnd = getPos(x, b'\n', fieldStart)
+            # Some replay files seem to have some corrupted characters at the end.
+            while fieldEnd - 1 > fieldStart + 1:
+                try:
+                    value = x[fieldStart+1:fieldEnd-1].decode('utf-8')
+                    return value
+                except ValueError:
+                    fieldEnd -= 1
+            # If we couldn't find a sensible value for the field then return an empty string.
+            return ''
+    
+        def getDateFieldAsTimestamp(x, field, start):
+            value = getField(x, field, start)
+            try:
+                # This is compatible with Python 2 and 3.
+                return time.mktime(datetime.datetime.strptime(value[:19], '%Y-%m-%d %H-%M-%S').timetuple())
+            except ValueError:
+                # Undefined outcomes have dates that are intentionally set to an invalid year (0000).
+                return None
+    
+        # Build information comes after the "StartGame" command.
+        startGame = x.index(b'StartGame')
+        
+        # Get end game information.
+        rootPos = getPos(x, b'Root:', 0)
+        if rootPos >= len(x):
+            print('Unable to find end game information in {} - replay corrupted?'.format(filename))
+            continue
+        try:
+            finalGameTick = int(getField(x, b'FinalGameTick', rootPos))
+        except:
+            # Earlier releases did not include this field.
+            finalGameTick = None
+        mapTitle = getField(x, b'MapTitle', rootPos)
+        version = getField(x, b'Version', rootPos)
+        startTime = getDateFieldAsTimestamp(x, b'StartTimeUtc', rootPos)
+        endTime = getDateFieldAsTimestamp(x, b'EndTimeUtc', rootPos)
+        
+        factionPicks = set()
+        # Try to get player information.
+        for playerId in [0, 1]:
+            pos = -1
+            while True:
+                pos = getPos(x, b'Player@%d:'%playerId, pos + 1)
+                if pos >= len(x):
+                    break
+                playerPos = pos
+            name = getField(x, b'Name', playerPos)
+            outcome = getField(x, b'Outcome', playerPos)
+            clientIndex = int(getField(x, b'ClientIndex', playerPos))
+            faction = getField(x, b'FactionName', playerPos)
+            fingerprint = getField(x, b'Fingerprint', playerPos)
+            try:
+                outcomeTime = getDateFieldAsTimestamp(x, b'OutcomeTimestampUtc', playerPos)
+            except ValueError:
+                # If no one was eliminated.
+                outcomeTime = None
+                raise
+            if fingerprint != '':
+                if fingerprint not in fingerPrintToProfile:
+                    response = requests.get('https://forum.openra.net/openra/info/' + fingerprint)
+                    profileID = 'Unknown'
+                    profileName = name
+                    for line in response.text.split('\n'):
+                        line = line.strip()
+                        if line.startswith('ProfileID: '):
+                            profileID = line[len('ProfileID: '):]
+                        elif line.startswith('ProfileName: '):
+                            profileName = line[len('ProfileName: '):]
+                    fingerPrintToProfile[fingerprint] = {'profileID': profileID, 'profileName': profileName}
+                    with open(FINGERPRINT_CACHE_FILE, 'a') as fingerprintCache:
+                        fingerprintCache.write('{}\t{}\t{}\n'.format(fingerprint, profileID, profileName))
+    
+            pos = -1
+            while True:
+                pos = getPos(x, b'Client@%d:'%clientIndex, pos + 1)
+                if pos >= len(x):
+                    break
+                clientPos = pos
+            factionPick = getField(x, b'Faction', clientPos)
+            
+            factionPicks.add(factionPick)
+            
+            players.append({'fingerprint': fingerprint,
+                            'name': name,
+                            'profileID': 'Unknown' if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileID'],
+                            'profileName': name if fingerprint == '' else fingerPrintToProfile[fingerprint]['profileName'],
+                            'clientIndex': clientIndex,
+                            'filename': filename,
+                            'release': RELEASE,
+                            'abbreviations': getAbbreviationsFromFilename(filename),
+                            'faction': faction,
+                            'factionPick': factionPick,
+                            'outcome': outcome,
+                            'finalGameTick': finalGameTick,
+                            'startTime': startTime,
+                            'outcomeTime': outcomeTime,
+                            'endTime': endTime,
+                            'mapTitle': mapTitle,
+                            'version': version})
+        if FACTION_PICK_FILTER != None and factionPicks != FACTION_PICK_FILTER:
+            # Remove both players and skip processing the file.
+            players = players[:-2]
+            continue
+        
+        # Store the client id to player id mapping.
+        clientToPlayerMap = {}
+        for player in players:
+            clientToPlayerMap[player['clientIndex']] = player
+        
+        # Load any chat messages.
+        pos = 0
+        chat = []
+        while pos < len(x):
+            pos = getPos(x, b'Chat', pos)
+            if pos < len(x):
+                try:
+                    chat.append(getChat(x, pos))
+                except UnicodeDecodeError:
+                    # Silently ignore chat message if it can't be decoded.
+                    pass
+        chats.append(chat)
+        
+        events = defaultdict(lambda : defaultdict(list))
+        actionMap = {b'StartProduction': (getPos, getStartProductionEvents),
+                     b'PlaceBuilding': (getPlaceBuildingPos, getPlaceBuildingEvents),
+                     b'LineBuild': (getPos, getPlaceBuildingEvents),
+                     b'CancelProduction': (getPos, getCancelProductionEvent),
+                     b'PauseProduction': (getPos, getPauseProductionEvent),
+                     b'SovietSpyPlane': (getPos, getSupportPowerEvent),
+                     b'SovietParatroopers': (getPos, getSupportPowerEvent),
+                     b'UkraineParabombs': (getPos, getSupportPowerEvent),
+                     b'Chronoshift': (getPos, getSupportPowerEvent),
+                     # Iron Curtain comes from two different events (depending on OpenRA release).
+                     b'GrantExternalConditionPowerInfoOrder': (getPos, getSupportPowerEvent),
+                     b'GrantUpgradePowerInfoOrder': (getPos, getSupportPowerEvent),
+                     b'NukePowerInfoOrder': (getPos, getSupportPowerEvent),
+                     # Sonar Pulse
+                     b'SpawnActorPowerInfoOrder': (getPos, getSupportPowerEvent),
+                     b'PauseGame': (getPos, getPauseGameEvent)}
+        pos = startGame
+        build = defaultdict(list)
+        actionList = defaultdict(list)
+        posMap = {}
+        try:
+            while True:
+                # Find the next action of each type in the file.
+                for term, functions in actionMap.items():
+                    if term not in posMap:
+                        getPosFn = functions[0]
+                        posMap[term] = getPosFn(x, term, pos)
+                minPos = min(posMap.values())
+                # Break if we're at the end of the file.
+                if minPos == len(x):
+                    break
+                # Execute the functions corresponding to the type of event.
+                for term, functions in actionMap.items():
+                    if posMap[term] == minPos:
+                        # Reset this entry in posMap so that we look for the next matching term next iteration.
+                        del posMap[term]
+                        getEventFn = functions[1]
+                        player, q, eventList = getEventFn(x, minPos)
+                        if term in [b'StartProduction', b'PlaceBuilding', b'LineBuild']:
+                            events[player][q] += eventList
+                            if term == b'PlaceBuilding' and q == 0:
+                                for item in eventList:
+                                    build[player].append(item)
+                        elif term == b'PauseProduction':
+                            # Remove item from queue, it will be re-added by another StartProduction event.
+                            removeLastStartProductionEvent(events, player, q, item)
+                        elif term == b'CancelProduction':
+                            # If the previous cancelled amount of this unit was not 1 or 5 then it must have been all of the items.
+                            maxCancelled = 0
+                            itemCancelled = (None if len(eventList) == 0 else eventList[0])
+                            numberCancelled = len(eventList)
+                            for actionTerm, actionQ, actionEventList in actionList[player]:
+                                if actionTerm == 'StartProduction' and actionQ == q and actionEventList[0] == itemCancelled:
+                                    maxCancelled += len(actionEventList)
+                                elif actionTerm == 'CancelProduction' and actionQ == q and actionEventList[0] == itemCancelled:
+                                    # If the previous cancelled amount of this unit was 1 or 5 then assume only some were cancelled.
+                                    if len(actionEventList) == 1 or len(actionEventList) == 5:
+                                        maxCancelled = max(0, maxCancelled - len(actionEventList))
+                                    else:
+                                        # Otherwise the whole queue was cancelled, so no more can be cancelled in future.
+                                        maxCancelled = 0
+                            for item in eventList[:maxCancelled]:
+                                # For buildings then we can only cancel production if it was not placed.
+                                unplaced = 0
+                                for event in events[player][q]:
+                                    if event == item:
+                                        unplaced += 1
+                                    elif event == '[{}]'.format(item):
+                                        unplaced -= 1
+                                if unplaced > 0:
+                                    removeLastStartProductionEvent(events, player, q, item)
+                        actionList[player].append((term.decode('utf-8'), q, eventList))
+                pos = minPos
+    
+            if len(events) != 2:
+                # Probably one of the players gave no orders.
+                print('Found game with {} player(s): {}'.format(len(events), filename))
+                for k in events.keys():
+                    print(k, events[k].keys())
+                    for kk in events[k].keys():
+                        print(kk, events[k][kk][:10], len(events[k][kk]))
+                print(events.keys())
+                players = players[:-2]
+                chats = chats[:-1]
+                #raise Exception
+            
+            for player in sorted(events.keys()):
+                eventList = events[player]
+                for q, queue in eventList.items():
+                    # Can be used to find which game contains an unusual item.
+                    if ITEM_TO_FIND in queue:
+                        print('{} found in {} ({}) Count: {}'.format(ITEM_TO_FIND, filename, mapTitle, queue.count(ITEM_TO_FIND)))
+                    #print(player, q, ','.join(queue))
+                    unitList[q] += queue
+                #if ''.join(build[player]).startswith('[PP][PP][PP]'):
+                #    print(filename, mapTitle)
+                builds.append(build[player])
+                buildsByMap[mapTitle].append(build[player])
+                # Convert defaultdict to list.
+                queues.append(list(map(lambda q: eventList[q], range(len(itemMap)))))
+                actions.append(actionList[player])
+        except ZeroDivisionError:
+            # Used for debugging.
+            sys.tracebacklimit = 0
+            raise Exception
+        except:
+            print('Skipping ' + filename)
+            raise
 
 ### Build the reports. ###
 
@@ -695,15 +743,15 @@ factionWin['Allies'] = factionWin['England'] + factionWin['France'] + factionWin
 factionLoss['Allies'] = factionLoss['England'] + factionLoss['France'] + factionLoss['Germany']
 factionWin['Soviet'] = factionWin['Russia'] + factionWin['Ukraine']
 factionLoss['Soviet'] = factionLoss['Russia'] + factionLoss['Ukraine']
-print('Faction         Win Rate        From Random A/S      Picked Win Rate')
-for factionTuple in [('England', ('England', 'RandomAllies'), 'england'),
-                    ('France', ('France', 'RandomAllies'), 'france'),
-                    ('Germany', ('Germany', 'RandomAllies'), 'germany'),
-                    ('Allies', 'RandomAllies', ''),
-                    ('Russia', ('Russia', 'RandomSoviet'), 'russia'),
-                    ('Ukraine', ('Ukraine', 'RandomSoviet'), 'ukraine'),
-                    ('Soviet', 'RandomSoviet', ''),
-                    ('Random', '', '')]:
+print('Faction         Win Rate            From Any        From Random A/S     Picked Win Rate')
+for factionTuple in [('England', ('England', 'Random'), ('England', 'RandomAllies'), 'england'),
+                    ('France', ('France', 'Random'), ('France', 'RandomAllies'), 'france'),
+                    ('Germany', ('Germany', 'Random'), ('Germany', 'RandomAllies'), 'germany'),
+                    ('Allies', '', 'RandomAllies', ''),
+                    ('Russia', ('Russia', 'Random'), ('Russia', 'RandomSoviet'), 'russia'),
+                    ('Ukraine', ('Ukraine', 'Random'), ('Ukraine', 'RandomSoviet'), 'ukraine'),
+                    ('Soviet', '', 'RandomSoviet', ''),
+                    ('Random', '', '', '')]:
     factionReports = []
     for faction in factionTuple:
         if factionWin[faction] > 0 or factionLoss[faction] > 0:
@@ -804,7 +852,7 @@ for profileName in sorted(set(map(lambda player: player['profileName'], players)
             elif player['outcome'] == 'Lost':
                 losses += 1
             playerPicks[player['factionPick']] += 1
-    winRate = '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
+    winRate = '--' if wins + losses == 0 else '{:0.0f}%'.format(wins * 100.0 / (wins + losses))
     factionStr = makeFactionString(playerPicks)
     print(u'=== {} (Played {} game(s), Win Rate {}, Factions {}) ==='.format(profileName, len(playerBuilds), winRate, factionStr))
     findPopularBuilds(playerBuilds, POPULAR_FOR_PLAYER)
